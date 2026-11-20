@@ -1,9 +1,9 @@
-//! What the caller sees while xcodebuild runs: slot paths shown as worktree paths,
-//! and the thousands of per-task cache remarks kept out of the way (they stay in the log).
+//! Slot paths shown as worktree paths, so what agb prints points at files the caller can open.
 use std::borrow::Cow;
 
 /// Replaces `slot` with `worktree` wherever it appears as a whole path (or a path prefix),
 /// so errors point at files the caller can open. `/s/src10` is not rewritten for slot `/s/src`.
+/// `slot` is spelled the way Xcode prints it (`slot::as_xcode_prints`), so one spelling is enough.
 pub fn to_caller<'a>(line: &'a str, slot: &str, worktree: &str) -> Cow<'a, str> {
     if slot.is_empty() || !line.contains(slot) {
         return Cow::Borrowed(line);
@@ -26,18 +26,6 @@ fn is_path_char(c: char) -> bool {
     c.is_alphanumeric() || "._-/~+@".contains(c)
 }
 
-/// Per-task cache remarks: kept in the log, left out of the terminal.
-pub fn is_cache_remark(line: &str) -> bool {
-    let t = line.trim();
-    if t == "Cache hit" || t == "Cache miss" {
-        return true;
-    }
-    let lower = t.to_ascii_lowercase();
-    ["note: replay cache", "note: replayed cache", "note: local cache", "note: cache miss", "note: cache hit", "note: using cas output"]
-        .iter()
-        .any(|p| lower.starts_with(p))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,23 +41,5 @@ mod tests {
         assert_eq!(r("/c/slots/app-1a2b3c4d/dd/Build/x.o"), "/c/slots/app-1a2b3c4d/dd/Build/x.o");
         assert_eq!(r("/x/c/slots/app-1a2b3c4d/src/A.swift"), "/x/c/slots/app-1a2b3c4d/src/A.swift");
         assert_eq!(r("a /c/slots/app-1a2b3c4d/src/A b /c/slots/app-1a2b3c4d/src/B"), "a /w/my app/A b /w/my app/B");
-    }
-
-    // A7.6
-    #[test]
-    fn hides_cache_remarks_but_never_errors_that_mention_a_cache() {
-        for l in [
-            "Cache hit",
-            "  Cache miss",
-            "note: replay cache hit",
-            "note: Local cache miss for key: llvmcas://1 (in target 'A')",
-            "note: using CAS output pcm: x",
-            "note: replayed cache hit: llvmcas://2",
-        ] {
-            assert!(is_cache_remark(l), "{l}");
-        }
-        for l in ["/a.swift:1:1: error: cache miss handling", "note: Building targets in dependency order", "warning: cache"] {
-            assert!(!is_cache_remark(l), "{l}");
-        }
     }
 }

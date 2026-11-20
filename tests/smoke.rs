@@ -14,7 +14,13 @@ fn line_value(out: &str, key: &str) -> Option<PathBuf> {
 }
 
 fn real(w: &World, cwd: &Path, args: &[&str]) -> Run {
-    Run(w.command(cwd, &[]).env_remove("AGENT_BUILD_XCODEBUILD").args(args).output().expect("run agb"))
+    Run(w
+        .command(cwd, &[])
+        .env_remove("AGENT_BUILD_XCODEBUILD")
+        .env_remove("AGENT_BUILD_XCRESULTTOOL")
+        .args(args)
+        .output()
+        .expect("run agb"))
 }
 
 // A1
@@ -44,6 +50,26 @@ fn a_standard_project_builds_and_tests_without_any_configuration() {
         &["xcodebuild", "test", "-project", "SampleApp.xcodeproj", "-scheme", "CoreTests", "-destination", "platform=macOS"],
     );
     assert_eq!(test.code(), 0, "{}", test.all());
-    let results = line_value(&test.stderr(), "test results").expect("test results line");
+    let results = line_value(&test.stderr(), "results").expect("results line");
     assert!(results.exists(), "{} does not exist", results.display());
+
+    // A compile error comes back from the real xcresulttool, located in the worktree.
+    let source = app.join("App/App.swift");
+    let mut text = std::fs::read_to_string(&source).expect("read App.swift");
+    text.push_str("func broken() -> Int { return \"not an int\" }\n");
+    std::fs::write(&source, &text).expect("write App.swift");
+    let line = text.lines().count();
+    let broken = real(
+        &w,
+        &app,
+        &["xcodebuild", "build", "-project", "SampleApp.xcodeproj", "-scheme", "App", "-destination", "generic/platform=iOS Simulator"],
+    );
+    assert_eq!(broken.code(), 65, "{}", broken.all());
+    let expected = format!("{}:{line}:", source.display());
+    assert!(
+        broken.stderr().lines().any(|l| l.starts_with(&expected) && l.contains(": error: ")),
+        "no error at {expected}: {}",
+        broken.all()
+    );
+    assert!(broken.stderr().contains("errors=1"), "{}", broken.all());
 }

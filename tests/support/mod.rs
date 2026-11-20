@@ -58,7 +58,8 @@ impl World {
             .env("XDG_CACHE_HOME", self.root.join("xdg-cache"))
             .env("XDG_STATE_HOME", self.root.join("xdg-state"))
             .env("XDG_CONFIG_HOME", self.root.join("xdg-config"))
-            .env("AGENT_BUILD_XCODEBUILD", Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-xcodebuild"))
+            .env("AGENT_BUILD_XCODEBUILD", fixture("fake-xcodebuild"))
+            .env("AGENT_BUILD_XCRESULTTOOL", fixture("fake-xcresulttool"))
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_NOSYSTEM", "1");
         for (k, v) in env {
@@ -108,6 +109,11 @@ impl Run {
     pub fn all(&self) -> String {
         format!("--- stdout\n{}--- stderr\n{}", self.stdout(), self.stderr())
     }
+}
+
+/// A file under tests/fixtures.
+pub fn fixture(rel: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures").join(rel)
 }
 
 pub fn git(dir: &Path, args: &[&str]) -> String {

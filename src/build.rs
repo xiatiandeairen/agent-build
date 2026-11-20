@@ -1,48 +1,62 @@
 //! Steps 5 and 6 of a run: run xcodebuild in the slot with its output locations and the cache,
-//! show its output with worktree paths, keep the full log, then report what happened.
+//! keep its full output in the log, then report from the result bundle: errors, failed tests,
+//! preconditions, cache, where the outputs are. Information commands (`-showBuildSettings`, …)
+//! print xcodebuild's output as is instead.
 use crate::app::Context;
+use agent_build_core::args::{self, Action, Outputs};
+use agent_build_core::json::{self, Json};
 use agent_build_core::report::{self, Outcome, Summary};
-use agent_build_core::{args, log, output, project, slot};
+use agent_build_core::xcresult::{self, Severity};
+use agent_build_core::{output, project, slot};
 use agent_build_sys::lock::SlotLock;
 use agent_build_sys::run::{self, Ended, Stream};
-use agent_build_sys::{ignored, sync};
+use agent_build_sys::{ignored, sync, xcresult as tool};
+use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 const KEEP_LOGS: usize = 50;
+/// Lines of raw output shown when a failed build left no result bundle to read.
+const TAIL: usize = 30;
 
 pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
     let archive = ctx.paths.archives.join(args::archive_name(ctx.inv.scheme.as_deref()));
-    let mut argv = args::injected(
-        ctx.inv.action,
-        &text(&ctx.paths.derived_data),
-        &text(&archive),
-        &text(&slot::cas_path(&ctx.dirs.cache)),
-        &ctx.config.cache_limit,
-    );
+    let _ = fs::remove_dir_all(&ctx.paths.result_bundle); // xcodebuild refuses an existing bundle; a missing one is fine
+    let (dd, archive_s, bundle_s) = (text(&ctx.paths.derived_data), text(&archive), text(&ctx.paths.result_bundle));
+    let outputs = Outputs { derived_data: &dd, archive: &archive_s, result_bundle: &bundle_s };
+    let mut argv = args::injected(ctx.inv.action, &outputs, &text(&slot::cas_path(&ctx.dirs.cache)), &ctx.config.cache_limit);
     argv.extend(ctx.inv.args.iter().cloned());
     let program = std::env::var("AGENT_BUILD_XCODEBUILD").unwrap_or_else(|_| "xcodebuild".to_string());
     let log_path = log_path(ctx);
+    let log_shown = log_path.as_deref().map(text).unwrap_or_else(|| "(not written)".to_string());
+    let quiet = ctx.inv.action != Action::Info;
+    if quiet {
+        eprintln!("{}", report::started_line(&ctx.slot_name, &log_shown));
+    }
     let mut log_file = log_path.as_ref().and_then(|p| File::create(p).ok()).map(BufWriter::new);
     if let Some(f) = log_file.as_mut() {
         let _ = writeln!(f, "$ {program} {}", argv.join(" ")); // the log is best effort
     }
     let (slot_src, worktree) = (text(&ctx.paths.src), text(&ctx.worktree));
     let started = Instant::now();
-    let mut lines: Vec<(f64, String)> = Vec::new();
+    let mut tail: VecDeque<String> = VecDeque::with_capacity(TAIL + 1);
     let ended = run::run(&program, &argv, &ctx.paths.src.join(&ctx.prefix), lock, |stream, line| {
         if let Some(f) = log_file.as_mut() {
             let _ = writeln!(f, "{line}"); // best effort
         }
-        lines.push((started.elapsed().as_secs_f64(), line.to_string()));
-        if !output::is_cache_remark(line) {
-            let shown = output::to_caller(line, &slot_src, &worktree);
-            match stream {
-                Stream::Out => println!("{shown}"),
-                Stream::Err => eprintln!("{shown}"),
+        if quiet {
+            tail.push_back(line.to_string());
+            if tail.len() > TAIL {
+                tail.pop_front();
             }
+            return;
+        }
+        let shown = output::to_caller(line, &slot_src, &worktree);
+        match stream {
+            Stream::Out => println!("{shown}"),
+            Stream::Err => eprintln!("{shown}"),
         }
     });
     drop(log_file);
@@ -55,50 +69,101 @@ pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
             Outcome::Built(127)
         }
     };
-    let log_shown = log_path.as_deref().map(text).unwrap_or_else(|| "(not written)".to_string());
-    finish(
-        ctx,
-        &lines,
-        &archive,
-        Summary {
-            ok: outcome == Outcome::Built(0),
-            slot: &ctx.slot_name,
-            sync_secs,
-            build_secs,
-            cache: &log::CacheStats::default(),
-            log: &log_shown,
-        },
-    );
+    let ok = outcome == Outcome::Built(0);
+    finish(ctx, &Run { tail: &tail, archive: &archive, ok, sync_secs, build_secs, log: &log_shown });
     outcome
 }
 
-/// Report lines, in order: phases, P4, top misses, P5, P8 (failed builds only), output locations, summary.
-fn finish(ctx: &Context, lines: &[(f64, String)], archive: &Path, summary: Summary) {
-    let plain = || lines.iter().map(|(_, l)| l.as_str());
-    let stamped: Vec<(f64, &str)> = lines.iter().map(|(t, l)| (*t, l.as_str())).collect();
-    let cache = log::cache_stats(plain());
-    let rewritten = sync::rewritten_by_build(&ctx.worktree, &ctx.paths.src).unwrap_or_default();
-    let missing = if summary.ok {
-        Vec::new()
-    } else {
-        ignored::missing_in_slot(&ctx.worktree, &ctx.paths.src, &project::mentioned_paths(plain(), &text(&ctx.paths.src)))
-    };
-    let products = ctx.paths.derived_data.join("Build").join("Products");
-    let xcresult = log::xcresult_path(plain()).map(|p| output::to_caller(&p, &text(&ctx.paths.src), &text(&ctx.worktree)).into_owned());
-    let report = [
-        report::phases_line(&log::phases(&stamped)),
-        report::p4_line(&log::p4_targets(plain())),
-        report::top_misses_line(&cache),
-        report::p5_line(&rewritten),
-        report::p8_line(&missing),
+/// What the build left for the report.
+struct Run<'a> {
+    tail: &'a VecDeque<String>,
+    archive: &'a Path,
+    ok: bool,
+    sync_secs: f64,
+    build_secs: f64,
+    log: &'a str,
+}
+
+/// What the result bundle says about this run.
+struct Results {
+    issues: Vec<xcresult::Issue>,
+    failures: Vec<String>,
+    cache: xcresult::CacheStats,
+    p4: Option<Vec<String>>,
+    phases: Vec<(&'static str, f64)>,
+}
+
+fn read_results(bundle: &Path, action: Action) -> Results {
+    let read = |what: &[&str]| tool::get(bundle, what).and_then(|t| json::parse(&t)).unwrap_or(Json::Null);
+    let build = read(&["build-results"]);
+    let log = read(&["log", "--type", "build"]);
+    let tests = if action == Action::Test { read(&["test-results", "summary"]) } else { Json::Null };
+    Results {
+        issues: xcresult::issues(&build),
+        failures: xcresult::test_failures(&tests),
+        cache: xcresult::cache(&log),
+        p4: xcresult::p4_targets(&build, &log),
+        phases: xcresult::phases(&log),
+    }
+}
+
+/// Report lines, in order: errors, failed tests (or the end of the raw output when a failed
+/// build left nothing to read), phases, P4, top misses, P5, P8, output locations, summary.
+fn finish(ctx: &Context, run: &Run) {
+    let (src, wt) = (text(&ctx.paths.src), text(&ctx.worktree));
+    let show = |s: &str| output::to_caller(s, &src, &wt).into_owned();
+    let r = read_results(&ctx.paths.result_bundle, ctx.inv.action);
+    let errors: Vec<&xcresult::Issue> = r.issues.iter().filter(|i| i.severity == Severity::Error).collect();
+    for e in &errors {
+        eprintln!("{}", report::issue_line(e.location.as_deref().map(show).as_deref(), e.severity, &show(&e.message)));
+    }
+    for f in &r.failures {
+        eprintln!("{}", report::test_failure_line(&show(f)));
+    }
+    let explained = !errors.is_empty() || !r.failures.is_empty();
+    if !run.ok && !explained && !run.tail.is_empty() {
+        eprintln!("{}", report::tail_header(run.tail.len()));
+        run.tail.iter().for_each(|l| eprintln!("{}", show(l)));
+    }
+    let lines = [
+        report::phases_line(&r.phases),
+        report::p4_line(r.p4.as_deref()),
+        report::top_misses_line(&r.cache),
+        report::p5_line(&sync::rewritten_by_build(&ctx.worktree, &ctx.paths.src).unwrap_or_default()),
+        report::p8_line(&missing_ignored(ctx, run, &errors)),
     ];
-    for line in report.into_iter().flatten() {
+    lines.into_iter().flatten().for_each(|l| eprintln!("{l}"));
+    let products = text(&ctx.paths.derived_data.join("Build").join("Products"));
+    let bundle = ctx.paths.result_bundle.exists().then(|| text(&ctx.paths.result_bundle));
+    for line in report::output_lines(ctx.inv.action, run.ok, &products, &text(run.archive), bundle.as_deref()) {
         eprintln!("{line}");
     }
-    for line in report::output_lines(ctx.inv.action, &text(&products), &text(archive), xcresult.as_deref()) {
-        eprintln!("{line}");
+    let (n_errors, warnings) = (errors.len(), r.issues.len() - errors.len());
+    let summary = Summary {
+        ok: run.ok,
+        slot: &ctx.slot_name,
+        sync_secs: run.sync_secs,
+        build_secs: run.build_secs,
+        cache: &r.cache,
+        errors: n_errors,
+        warnings,
+        log: run.log,
+    };
+    eprintln!("{}", report::summary_line(&summary));
+}
+
+/// P8: git-ignored files a failed build looked for, from its errors or, without them, its last lines.
+fn missing_ignored(ctx: &Context, run: &Run, errors: &[&xcresult::Issue]) -> Vec<String> {
+    if run.ok {
+        return Vec::new();
     }
-    eprintln!("{}", report::summary_line(&Summary { cache: &cache, ..summary }));
+    let texts: Vec<String> = if errors.is_empty() {
+        run.tail.iter().cloned().collect()
+    } else {
+        errors.iter().map(|e| format!("{} {}", e.location.as_deref().unwrap_or_default(), e.message)).collect()
+    };
+    let mentioned = project::mentioned_paths(texts.iter().map(String::as_str), &text(&ctx.paths.src));
+    ignored::missing_in_slot(&ctx.worktree, &ctx.paths.src, &mentioned)
 }
 
 fn log_path(ctx: &Context) -> Option<PathBuf> {

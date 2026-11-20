@@ -1,0 +1,15 @@
+#!/bin/bash
+# Stand-in for `xcrun xcresulttool get <what> --path <bundle>`: prints the JSON recorded in
+# $FAKE_XCRESULT (a directory under tests/fixtures/xcresult) with @SRC@ replaced by the slot's src.
+bundle=""; prev=""
+for a in "$@"; do [ "$prev" = "--path" ] && bundle="$a"; prev="$a"; done
+case " $* " in
+  *" build-results "*) kind=build ;;
+  *" test-results "*) kind=tests ;;
+  *" log "*) kind=log ;;
+  *) exit 64 ;;
+esac
+file="$FAKE_XCRESULT/$kind.json"
+[ -n "$FAKE_XCRESULT" ] && [ -d "$bundle" ] && [ -f "$file" ] || exit 1
+src="$(dirname "$bundle")/src"
+sed "s#@SRC@#${src}#g" "$file"

@@ -1,7 +1,7 @@
 //! The lines agb prints itself, the exit code, and which old logs to remove.
 //! Every line starts with `agb:` so agents can find them in a long build log.
 use crate::args::Action;
-use crate::log::CacheStats;
+use crate::xcresult::{CacheStats, Severity};
 
 pub const PREFIX: &str = "agb:";
 
@@ -11,18 +11,22 @@ pub struct Summary<'a> {
     pub sync_secs: f64,
     pub build_secs: f64,
     pub cache: &'a CacheStats,
+    pub errors: usize,
+    pub warnings: usize,
     pub log: &'a str,
 }
 
 pub fn summary_line(s: &Summary) -> String {
     format!(
-        "{PREFIX} {} slot={} sync={:.1}s build={:.1}s cache hit={} miss={} log={}",
+        "{PREFIX} {} slot={} sync={:.1}s build={:.1}s cache hit={} miss={} errors={} warnings={} log={}",
         if s.ok { "ok" } else { "failed" },
         s.slot,
         s.sync_secs,
         s.build_secs,
         s.cache.hits,
         s.cache.misses,
+        s.errors,
+        s.warnings,
         s.log
     )
 }
@@ -35,10 +39,39 @@ pub fn phases_line(phases: &[(&str, f64)]) -> Option<String> {
     Some(format!("{PREFIX} phases {}", parts.join(" ")))
 }
 
-pub fn p4_line(targets: &[String]) -> Option<String> {
-    (!targets.is_empty()).then(|| {
-        format!("{PREFIX} precondition P4 not met: {} (explicit modules off) — their Swift compiles are not cached", targets.join(", "))
-    })
+/// `None`: Xcode did not warn. An empty list: it warned but no target could be named.
+pub fn p4_line(targets: Option<&[String]>) -> Option<String> {
+    let names = match targets? {
+        [] => "some Swift targets".to_string(),
+        t => t.join(", "),
+    };
+    Some(format!("{PREFIX} precondition P4 not met: {names} (explicit modules off) — their Swift compiles are not cached"))
+}
+
+/// An error or warning as compilers print it, so editors and agents can jump to it.
+pub fn issue_line(location: Option<&str>, severity: Severity, message: &str) -> String {
+    let kind = match severity {
+        Severity::Error => "error",
+        Severity::Warning => "warning",
+    };
+    match location {
+        Some(at) => format!("{at}: {kind}: {message}"),
+        None => format!("{kind}: {message}"),
+    }
+}
+
+pub fn test_failure_line(failure: &str) -> String {
+    format!("{PREFIX} test failed: {failure}")
+}
+
+/// Before the end of xcodebuild's output, shown when a failed build left no result to read.
+pub fn tail_header(lines: usize) -> String {
+    format!("{PREFIX} no result bundle to read; the last {lines} lines of xcodebuild's output:")
+}
+
+/// Before xcodebuild starts: its output goes to the log, not the terminal.
+pub fn started_line(slot: &str, log: &str) -> String {
+    format!("{PREFIX} building in slot {slot}; xcodebuild's full output: {log}")
 }
 
 pub fn p5_line(files: &[String]) -> Option<String> {
@@ -70,16 +103,19 @@ pub fn top_misses_line(cache: &CacheStats) -> Option<String> {
 }
 
 /// Where the outputs of this run are. They live in the slot and change on the project's next run.
-pub fn output_lines(action: Action, products: &str, archive: &str, xcresult: Option<&str>) -> Vec<String> {
+/// A failed build points only at its results: its products and archive may be stale or missing.
+pub fn output_lines(action: Action, ok: bool, products: &str, archive: &str, results: Option<&str>) -> Vec<String> {
     let mut v = Vec::new();
+    if let Some(r) = results {
+        v.push(format!("{PREFIX} results={r}"));
+    }
+    if !ok {
+        return v;
+    }
     match action {
         Action::Archive => v.push(format!("{PREFIX} archive={archive}")),
-        Action::Test => {
-            if let Some(x) = xcresult {
-                v.push(format!("{PREFIX} test results={x}"));
-            }
-        }
-        Action::Build => {}
+        Action::Info => return v,
+        Action::Build | Action::Test => {}
     }
     v.push(format!("{PREFIX} products={products} (valid until this project's next agb run; copy what you keep)"));
     v
@@ -144,8 +180,20 @@ mod tests {
     #[test]
     fn summary_carries_result_slot_timings_cache_and_log() {
         let cache = CacheStats { hits: 46, misses: 23, misses_by_target: vec![] };
-        let s = Summary { ok: true, slot: "app-1a2b3c4d", sync_secs: 1.06, build_secs: 35.94, cache: &cache, log: "/l/x.log" };
-        assert_eq!(summary_line(&s), "agb: ok slot=app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 log=/l/x.log");
+        let s = Summary {
+            ok: true,
+            slot: "app-1a2b3c4d",
+            sync_secs: 1.06,
+            build_secs: 35.94,
+            cache: &cache,
+            errors: 0,
+            warnings: 2,
+            log: "/l/x.log",
+        };
+        assert_eq!(
+            summary_line(&s),
+            "agb: ok slot=app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 errors=0 warnings=2 log=/l/x.log"
+        );
         assert!(summary_line(&Summary { ok: false, ..s }).starts_with("agb: failed "));
         assert_eq!(phases_line(&[("resolve", 7.7), ("execute", 18.6)]).as_deref(), Some("agb: phases resolve=7.7s execute=18.6s"));
         assert_eq!(phases_line(&[]), None);
@@ -158,20 +206,38 @@ mod tests {
         let c = CacheStats { hits: 0, misses: 49, misses_by_target: by };
         assert_eq!(top_misses_line(&c).as_deref(), Some("agb: top misses: T0 10, T1 9, T2 8, T3 7, T4 6"));
         assert_eq!(top_misses_line(&CacheStats::default()), None);
-        assert!(p4_line(&["App".into()]).is_some_and(|l| l.contains("P4 not met: App")));
+        assert!(p4_line(Some(&["App".into()])).is_some_and(|l| l.contains("P4 not met: App")));
+        assert!(p4_line(Some(&[])).is_some_and(|l| l.contains("P4 not met: some Swift targets")));
+        assert_eq!(p4_line(None), None);
         assert!(p5_line(&["App/Gen.swift".into()]).is_some_and(|l| l.contains("P5 not met") && l.contains("App/Gen.swift")));
-        assert_eq!(p4_line(&[]), None);
     }
 
     // A7.7
     #[test]
     fn tells_where_each_action_left_its_output() {
-        let build = output_lines(Action::Build, "/s/dd/Build/Products", "/s/archives/App.xcarchive", None);
-        assert_eq!(build.len(), 1);
-        assert!(build[0].contains("products=/s/dd/Build/Products") && build[0].contains("valid until"));
-        let test = output_lines(Action::Test, "/p", "/a", Some("/s/dd/Logs/Test/T.xcresult"));
-        assert_eq!(test[0], "agb: test results=/s/dd/Logs/Test/T.xcresult");
-        assert_eq!(output_lines(Action::Archive, "/p", "/s/archives/App.xcarchive", None)[0], "agb: archive=/s/archives/App.xcarchive");
+        let build = output_lines(Action::Build, true, "/s/dd/Build/Products", "/s/archives/App.xcarchive", Some("/s/result.xcresult"));
+        assert_eq!(build[0], "agb: results=/s/result.xcresult");
+        assert!(build[1].contains("products=/s/dd/Build/Products") && build[1].contains("valid until"));
+        assert_eq!(output_lines(Action::Test, true, "/p", "/a", None).len(), 1, "no results line without a bundle");
+        assert_eq!(
+            output_lines(Action::Archive, true, "/p", "/s/archives/App.xcarchive", None)[0],
+            "agb: archive=/s/archives/App.xcarchive"
+        );
+        assert!(output_lines(Action::Info, true, "/p", "/a", None).is_empty());
+        assert_eq!(
+            output_lines(Action::Archive, false, "/p", "/a", Some("/s/r.xcresult")),
+            ["agb: results=/s/r.xcresult"],
+            "a failed build has no products to point at"
+        );
+    }
+
+    // A7.6
+    #[test]
+    fn prints_issues_as_compilers_do_and_marks_its_own_lines() {
+        assert_eq!(issue_line(Some("/w/A.swift:3:7"), Severity::Error, "boom"), "/w/A.swift:3:7: error: boom");
+        assert_eq!(issue_line(None, Severity::Warning, "w"), "warning: w");
+        assert_eq!(test_failure_line("S/t(): no"), "agb: test failed: S/t(): no");
+        assert!(tail_header(30).starts_with("agb: ") && started_line("s", "/l").contains("/l"));
     }
 
     // A6.1

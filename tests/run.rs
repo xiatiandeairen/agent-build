@@ -105,6 +105,7 @@ fn a_failed_build_is_reported_as_is_once_with_its_exit_code_and_log() -> TestRes
     let env = [("FAKE_EXIT", "65".to_string()), ("FAKE_ERROR", "App/A.swift".to_string()), ("FAKE_COUNT", count.to_string_lossy().into())];
     let r = w.build(&a, &env);
     assert_eq!(r.code(), 65, "{}", r.all());
+    assert!(r.stderr().contains("agb: no result bundle to read; the last"), "{}", r.all());
     assert!(r.stderr().contains(&format!("{}/App/A.swift:1:1: error: boom", a.display())), "{}", r.all());
     assert!(!r.stderr().lines().any(|l| l.contains("error: boom") && l.contains("/slots/")), "the error points into the slot: {}", r.all());
     assert!(r.stderr().contains("agb: failed slot="), "{}", r.all());
@@ -134,47 +135,6 @@ fn a_failed_sync_exits_125_without_building_and_the_next_run_recovers() -> TestR
     assert!(chmod("u+w")?);
     assert_eq!(w.build(&a, &env).code(), 0);
     assert_eq!(fs::read_to_string(w.slot_src().join("App/A.swift"))?, "let a = 2\n");
-    Ok(())
-}
-
-const RECORDED: &str = "Resolve Package Graph
-ComputePackagePrebuildTargetDependencyGraph
-CreateBuildDescription
-SwiftCompile normal arm64 /x/A.swift (in target 'App' from project 'App')
-note: Local cache miss for key: llvmcas://1 (in target 'App' from project 'App')
-Cache miss
-note: replay cache hit
-Cache hit
-warning: swift compiler caching requires explicit module build (SWIFT_ENABLE_EXPLICIT_MODULES=YES) (in target 'Legacy' from project 'Legacy')
-** BUILD SUCCEEDED **
-";
-
-// A7
-#[test]
-fn the_report_lists_phases_preconditions_misses_and_outputs_in_order() -> TestResult {
-    let w = World::new("report");
-    let a = repo(&w.path("app"));
-    let log = w.path("recorded.log");
-    write(&log, RECORDED);
-    let env = [("FAKE_OUTPUT", log.to_string_lossy().into_owned()), ("FAKE_TOUCH", "App/B.swift".to_string())];
-    let r = w.build(&a, &env);
-    assert_eq!(r.code(), 0, "{}", r.all());
-    let ours: Vec<String> = r.stderr().lines().filter(|l| l.starts_with("agb:")).map(String::from).collect();
-    let kinds: Vec<&str> = ours.iter().map(|l| l.split_whitespace().nth(1).unwrap_or("").split('=').next().unwrap_or("")).collect();
-    assert_eq!(kinds, ["phases", "precondition", "top", "precondition", "products", "ok"], "{ours:#?}");
-    assert!(ours[1].contains("P4 not met: Legacy") && ours[3].contains("P5 not met") && ours[3].contains("App/B.swift"), "{ours:#?}");
-    assert!(ours[2].contains("top misses: App 1") && ours[5].contains("cache hit=1 miss=1"), "{ours:#?}");
-    let out = r.stdout();
-    assert!(out.contains("** BUILD SUCCEEDED **") && out.contains("explicit module build"), "{out}");
-    assert!(!out.contains("Cache hit") && !out.contains("note: replay cache"), "cache remarks reached the terminal: {out}");
-
-    let again = w.build(&a, &[]);
-    assert!(!again.stderr().contains("P5 not met"), "{}", again.all());
-    assert_eq!(
-        fs::read_to_string(w.slot_src().join("App/B.swift"))?,
-        fs::read_to_string(a.join("App/B.swift"))?,
-        "the next run restores it"
-    );
     Ok(())
 }
 

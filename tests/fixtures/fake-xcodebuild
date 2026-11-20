@@ -9,6 +9,9 @@ here() { pwd -P | sed -E 's#^/private/(var|tmp|etc)/#/\1/#'; }
 [ -n "$FAKE_TOUCH" ] && echo "changed by the build" >> "$FAKE_TOUCH"
 [ -n "$FAKE_OUTPUT" ] && cat "$FAKE_OUTPUT"
 [ -n "$FAKE_ERROR" ] && echo "$(here)/$FAKE_ERROR:1:1: error: boom" >&2
+if [ -n "$FAKE_XCRESULT" ]; then # make the result bundle xcodebuild was asked for
+  prev=""; for a in "$@"; do [ "$prev" = "-resultBundlePath" ] && mkdir -p "$a"; prev="$a"; done
+fi
 [ -n "$FAKE_SLEEP" ] && sleep "$FAKE_SLEEP"
 [ -n "$FAKE_DONE" ] && touch "$FAKE_DONE"
 exit "${FAKE_EXIT:-0}"

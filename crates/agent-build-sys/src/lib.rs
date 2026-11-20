@@ -7,3 +7,4 @@ pub mod lock;
 pub mod run;
 pub mod signals;
 pub mod sync;
+pub mod xcresult;
