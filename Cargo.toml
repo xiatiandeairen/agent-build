@@ -1,0 +1,37 @@
+[workspace]
+members = ["crates/agent-build-core", "crates/agent-build-sys"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+too_many_lines = "deny"
+
+[package]
+name = "agent-build"
+edition.workspace = true
+version.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Run xcodebuild from any worktree in a fixed per-project build slot so incremental builds and the compilation cache carry over"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "agent-build"
+path = "src/main.rs"
+
+[dependencies]
+agent-build-core = { path = "crates/agent-build-core" }
+agent-build-sys = { path = "crates/agent-build-sys" }

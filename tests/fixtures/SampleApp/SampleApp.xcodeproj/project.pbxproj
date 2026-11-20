@@ -1,0 +1,248 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AB0000000000000000000B01 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000F01 /* App.swift */; };
+		AB0000000000000000000B02 /* CoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000F02 /* CoreTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AB0000000000000000000F01 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		AB0000000000000000000F02 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
+		AB0000000000000000000F03 /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB0000000000000000000F04 /* CoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		AB0000000000000000000G00 = {
+			isa = PBXGroup;
+			children = (
+				AB0000000000000000000G01 /* App */,
+				AB0000000000000000000G02 /* Tests */,
+				AB0000000000000000000G03 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AB0000000000000000000G01 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				AB0000000000000000000F01 /* App.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		AB0000000000000000000G02 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				AB0000000000000000000F02 /* CoreTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		AB0000000000000000000G03 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AB0000000000000000000F03 /* App.app */,
+				AB0000000000000000000F04 /* CoreTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AB0000000000000000000T01 /* App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB0000000000000000000L01 /* Build configuration list for PBXNativeTarget "App" */;
+			buildPhases = (
+				AB0000000000000000000S01 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = App;
+			productName = App;
+			productReference = AB0000000000000000000F03 /* App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		AB0000000000000000000T02 /* CoreTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB0000000000000000000L02 /* Build configuration list for PBXNativeTarget "CoreTests" */;
+			buildPhases = (
+				AB0000000000000000000S02 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CoreTests;
+			productName = CoreTests;
+			productReference = AB0000000000000000000F04 /* CoreTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AB0000000000000000000P00 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+			};
+			buildConfigurationList = AB0000000000000000000L00 /* Build configuration list for PBXProject "SampleApp" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AB0000000000000000000G00;
+			productRefGroup = AB0000000000000000000G03 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AB0000000000000000000T01 /* App */,
+				AB0000000000000000000T02 /* CoreTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AB0000000000000000000S01 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AB0000000000000000000B01 /* App.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB0000000000000000000S02 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AB0000000000000000000B02 /* CoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AB0000000000000000000C01 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		AB0000000000000000000C02 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		AB0000000000000000000C03 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentbuild.sample;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		AB0000000000000000000C04 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentbuild.sample;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		AB0000000000000000000C05 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentbuild.sample.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Debug;
+		};
+		AB0000000000000000000C06 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.agentbuild.sample.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AB0000000000000000000L00 /* Build configuration list for PBXProject "SampleApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB0000000000000000000C01 /* Debug */,
+				AB0000000000000000000C02 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB0000000000000000000L01 /* Build configuration list for PBXNativeTarget "App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB0000000000000000000C03 /* Debug */,
+				AB0000000000000000000C04 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB0000000000000000000L02 /* Build configuration list for PBXNativeTarget "CoreTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB0000000000000000000C05 /* Debug */,
+				AB0000000000000000000C06 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AB0000000000000000000P00 /* Project object */;
+}

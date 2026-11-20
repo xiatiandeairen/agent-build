@@ -1,0 +1,138 @@
+//! `$XDG_CONFIG_HOME/agent-build/config.yaml`: optional, one key, a minimal YAML subset.
+//! Anything outside `key: value` lines and `#` comments is an error with its line number,
+//! never a guess.
+use std::path::PathBuf;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Config {
+    /// Size limit of the shared compilation cache, passed to Xcode as is (e.g. `40G`).
+    pub cache_limit: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config { cache_limit: "40G".to_string() }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigError {
+    pub line: usize,
+    pub message: String,
+}
+
+impl std::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "line {}: {}", self.line, self.message)
+    }
+}
+
+pub fn parse(text: &str) -> Result<Config, ConfigError> {
+    let mut config = Config::default();
+    for (i, raw) in text.lines().enumerate() {
+        let line = i + 1;
+        let err = |message: &str| ConfigError { line, message: message.to_string() };
+        let content = strip_comment(raw);
+        if content.trim().is_empty() {
+            continue;
+        }
+        if content.starts_with([' ', '\t']) {
+            return Err(err("nested values are not supported; write `key: value` at the start of the line"));
+        }
+        if content.starts_with('-') {
+            return Err(err("lists are not supported"));
+        }
+        let (key, value) = content.split_once(':').ok_or_else(|| err("expected `key: value`"))?;
+        let value = unquote(value.trim());
+        match key.trim() {
+            "cache_limit" if is_size(value) => config.cache_limit = value.to_string(),
+            "cache_limit" => return Err(err("cache_limit must be a size such as 40G, 512M or 1T")),
+            other => return Err(err(&format!("unknown key `{other}` (known: cache_limit)"))),
+        }
+    }
+    Ok(config)
+}
+
+fn strip_comment(line: &str) -> &str {
+    if line.trim_start().starts_with('#') {
+        return "";
+    }
+    match line.find(" #") {
+        Some(p) => &line[..p],
+        None => line,
+    }
+}
+
+fn unquote(v: &str) -> &str {
+    for q in ['"', '\''] {
+        if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
+            return &v[1..v.len() - 1];
+        }
+    }
+    v
+}
+
+fn is_size(v: &str) -> bool {
+    let digits = v.trim_end_matches(['K', 'M', 'G', 'T']);
+    let unit_len = v.len() - digits.len();
+    !digits.is_empty() && unit_len <= 1 && digits.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Base directories per the XDG Base Directory spec: the variable when it is an absolute path,
+/// otherwise `$HOME/<default>`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Dirs {
+    pub config: PathBuf,
+    pub cache: PathBuf,
+    pub state: PathBuf,
+}
+
+pub fn dirs(lookup: impl Fn(&str) -> Option<String>) -> Option<Dirs> {
+    let home = PathBuf::from(lookup("HOME")?);
+    let base = |var: &str, default: &str| match lookup(var) {
+        Some(v) if v.starts_with('/') => PathBuf::from(v),
+        _ => home.join(default),
+    };
+    Some(Dirs {
+        config: base("XDG_CONFIG_HOME", ".config").join("agent-build"),
+        cache: base("XDG_CACHE_HOME", ".cache").join("agent-build"),
+        state: base("XDG_STATE_HOME", ".local/state").join("agent-build"),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A8.1
+    #[test]
+    fn reads_the_one_key_and_rejects_everything_else_with_a_line_number() {
+        assert_eq!(parse("").unwrap(), Config::default());
+        assert_eq!(parse("# c\n\ncache_limit: 20G  # smaller\n").unwrap().cache_limit, "20G");
+        assert_eq!(parse("cache_limit: \"512M\"").unwrap().cache_limit, "512M");
+        let line_of = |t: &str| parse(t).unwrap_err().line;
+        assert_eq!(line_of("cache_limit: 1G\nslots: 3\n"), 2);
+        assert_eq!(line_of("cache_limit: 1G\n  limit: 40G\n"), 2);
+        assert_eq!(line_of("cache:\n  limit: 40G\n"), 1);
+        assert_eq!(line_of("- a\n"), 1);
+        assert_eq!(line_of("cache_limit: lots\n"), 1);
+        assert_eq!(line_of("cache_limit: 40GB\n"), 1);
+        assert_eq!(line_of("just text\n"), 1);
+        assert!(parse("slots: 3").unwrap_err().message.contains("unknown key `slots`"));
+    }
+
+    // A8.1
+    #[test]
+    fn xdg_variables_move_the_directories_and_relative_ones_are_ignored() {
+        let env =
+            |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let d = dirs(env(&[("HOME", "/h")])).unwrap();
+        assert_eq!(d.config, PathBuf::from("/h/.config/agent-build"));
+        assert_eq!(d.cache, PathBuf::from("/h/.cache/agent-build"));
+        assert_eq!(d.state, PathBuf::from("/h/.local/state/agent-build"));
+        let d = dirs(env(&[("HOME", "/h"), ("XDG_CONFIG_HOME", "/x"), ("XDG_CACHE_HOME", "rel")])).unwrap();
+        assert_eq!(d.config, PathBuf::from("/x/agent-build"));
+        assert_eq!(d.cache, PathBuf::from("/h/.cache/agent-build"));
+        assert!(dirs(env(&[])).is_none());
+    }
+}
