@@ -97,7 +97,6 @@ fn is_size(v: &str) -> bool {
 pub struct Dirs {
     pub config: PathBuf,
     pub cache: PathBuf,
-    pub state: PathBuf,
 }
 
 pub fn dirs(lookup: impl Fn(&str) -> Option<String>) -> Option<Dirs> {
@@ -109,7 +108,6 @@ pub fn dirs(lookup: impl Fn(&str) -> Option<String>) -> Option<Dirs> {
     Some(Dirs {
         config: base("XDG_CONFIG_HOME", ".config").join("agent-build"),
         cache: base("XDG_CACHE_HOME", ".cache").join("agent-build"),
-        state: base("XDG_STATE_HOME", ".local/state").join("agent-build"),
     })
 }
 
@@ -142,7 +140,6 @@ mod tests {
         let d = dirs(env(&[("HOME", "/h")])).unwrap();
         assert_eq!(d.config, PathBuf::from("/h/.config/agent-build"));
         assert_eq!(d.cache, PathBuf::from("/h/.cache/agent-build"));
-        assert_eq!(d.state, PathBuf::from("/h/.local/state/agent-build"));
         let d = dirs(env(&[("HOME", "/h"), ("XDG_CONFIG_HOME", "/x"), ("XDG_CACHE_HOME", "rel")])).unwrap();
         assert_eq!(d.config, PathBuf::from("/x/agent-build"));
         assert_eq!(d.cache, PathBuf::from("/h/.cache/agent-build"));

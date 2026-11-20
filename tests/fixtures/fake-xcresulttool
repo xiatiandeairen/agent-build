@@ -1,6 +1,7 @@
 #!/bin/bash
 # Stand-in for `xcrun xcresulttool get <what> --path <bundle>`: prints the JSON recorded in
-# $FAKE_XCRESULT (a directory under tests/fixtures/xcresult) with @SRC@ replaced by the slot's src.
+# $FAKE_XCRESULT (a directory under tests/fixtures/xcresult) with @SRC@ replaced by the checkout
+# the fake xcodebuild noted it built: the slot's source.
 bundle=""; prev=""
 for a in "$@"; do [ "$prev" = "--path" ] && bundle="$a"; prev="$a"; done
 case " $* " in
@@ -11,5 +12,5 @@ case " $* " in
 esac
 file="$FAKE_XCRESULT/$kind.json"
 [ -n "$FAKE_XCRESULT" ] && [ -d "$bundle" ] && [ -f "$file" ] || exit 1
-src="$(dirname "$bundle")/src"
+src="$(cat "$bundle/.src")"
 sed "s#@SRC@#${src}#g" "$file"

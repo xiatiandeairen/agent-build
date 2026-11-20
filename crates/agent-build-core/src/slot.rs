@@ -25,18 +25,17 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
 }
 
+/// The slot: the build state every worktree of the project shares. What a run hands to its caller
+/// lives in that worktree instead (`project::output`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotPaths {
     pub root: PathBuf,
     /// The slot's clone of the code.
-    pub src: PathBuf,
+    pub source: PathBuf,
     /// The slot's DerivedData.
     pub derived_data: PathBuf,
-    pub archives: PathBuf,
     /// The project's own compilation cache; cleared after a build that left it over `cache_limit`.
-    pub cas: PathBuf,
-    /// The last run's result bundle; replaced by each run.
-    pub result_bundle: PathBuf,
+    pub compilation_cache: PathBuf,
     /// Held with flock for the whole run; the kernel releases it when the last process holding it exits.
     pub lock: PathBuf,
     /// Who holds the lock, for the waiting message.
@@ -48,11 +47,9 @@ pub struct SlotPaths {
 pub fn slot_paths(cache_dir: &Path, name: &str) -> SlotPaths {
     let root = cache_dir.join("slots").join(name);
     SlotPaths {
-        src: root.join("src"),
-        derived_data: root.join("dd"),
-        archives: root.join("archives"),
-        cas: root.join("cas"),
-        result_bundle: root.join("result.xcresult"),
+        source: root.join("source"),
+        derived_data: root.join("DerivedData"),
+        compilation_cache: root.join("CompilationCache"),
         lock: root.join("lock"),
         owner: root.join("owner"),
         ignored_record: root.join("ignored_inputs"),
@@ -98,7 +95,7 @@ mod tests {
         let b = slot_paths(c, &slot_name(Some("u:a/two.git"), "/g"));
         assert_ne!(a.lock, b.lock);
         assert_eq!(a.lock, slot_paths(c, &slot_name(Some("u:a/one.git"), "/other")).lock);
-        assert!(a.src.starts_with(&a.root) && a.derived_data.starts_with(&a.root));
+        assert!(a.source.starts_with(&a.root) && a.derived_data.starts_with(&a.root));
     }
 
     // A7.5

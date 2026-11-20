@@ -63,7 +63,7 @@ fn a_failed_build_shows_its_errors_from_the_result_bundle_and_not_the_raw_output
 fn a_successful_build_reports_cache_counters_misses_and_phases() {
     let w = World::new("report-hits");
     let a = repo(&w.path("app"));
-    let r = w.build(&a, &[bundle("hits")]);
+    let r = w.build(&a, &[bundle("hits"), ("FAKE_PRODUCT", "app".to_string())]);
     assert_eq!(r.code(), 0, "{}", r.all());
     assert_eq!(kinds(&r), ["building", "phases", "top", "results", "products", "ok"], "{}", r.all());
     assert!(

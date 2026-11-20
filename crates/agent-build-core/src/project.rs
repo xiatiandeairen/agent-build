@@ -1,15 +1,49 @@
-//! `.agent-build.yaml` at the root of the project's repository: the git-ignored paths its build
-//! needs (precondition P8). Owned and committed by the project; the global config stays
-//! project-agnostic. Same minimal YAML subset as the config, plus one block list:
+//! `.agent-build/` at the root of a worktree: what agb keeps for this project and this worktree.
+//!
+//! `config.yaml` lists the git-ignored paths the build needs (precondition P8). Owned and committed
+//! by the project; the global config stays project-agnostic. Same minimal YAML subset as the
+//! config, plus one block list:
 //!
 //! ```yaml
 //! ignored_inputs:
 //!   - rust-core/build/
 //!   - App/Generated.swift
 //! ```
+//!
+//! `output/` holds what a run hands to its caller. The slot is shared by every worktree, so
+//! anything left there changes with another worktree's build; here it changes only with this
+//! worktree's next run that makes the same kind of output. It ignores itself in git, so it is
+//! neither committed nor synced into the slot.
 use crate::config::{ConfigError, strip_comment, unquote};
+use std::path::{Path, PathBuf};
 
-pub const FILE: &str = ".agent-build.yaml";
+pub const FILE: &str = ".agent-build/config.yaml";
+const OUTPUT: &str = ".agent-build/output";
+/// Written as `output/.gitignore`: ignores the directory, itself included.
+pub const OUTPUT_GITIGNORE: &str = "# Automatically created by agent-build.\n*\n";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Output {
+    pub dir: PathBuf,
+    /// A copy of the slot's products as this run left them.
+    pub products: PathBuf,
+    /// Where the copy is made before it becomes `products`, so a cut-off copy is never mistaken for one.
+    pub staging: PathBuf,
+    pub result_bundle: PathBuf,
+    /// xcodebuild's full output.
+    pub log: PathBuf,
+}
+
+pub fn output(worktree: &Path) -> Output {
+    let dir = worktree.join(OUTPUT);
+    Output {
+        products: dir.join("Products"),
+        staging: dir.join(".staging"),
+        result_bundle: dir.join("result.xcresult"),
+        log: dir.join("build.log"),
+        dir,
+    }
+}
 
 /// Paths relative to the repository root, without a trailing `/`.
 pub fn parse(text: &str) -> Result<Vec<String>, ConfigError> {
@@ -93,6 +127,16 @@ mod tests {
         assert_eq!(line_of("ignored_inputs:\n- a\n"), 2);
         assert_eq!(line_of("ignored_inputs:\n  - a\nslots: 3\n"), 3);
         assert!(parse("cache_limit: 1G").unwrap_err().message.contains("unknown key `cache_limit`"));
+    }
+
+    // A19
+    #[test]
+    fn the_output_lives_in_the_worktree_and_ignores_itself() {
+        let out = output(Path::new("/w"));
+        assert_eq!(out.dir, PathBuf::from("/w/.agent-build/output"));
+        assert!([&out.products, &out.staging, &out.result_bundle, &out.log].iter().all(|p| p.parent() == Some(out.dir.as_path())));
+        assert_eq!(OUTPUT_GITIGNORE.lines().last(), Some("*"));
+        assert!(Path::new(FILE).starts_with(".agent-build"));
     }
 
     // A11.2

@@ -19,6 +19,9 @@ pub struct Invocation {
     /// Each dropped flag with its value, e.g. `-derivedDataPath /tmp/dd`.
     pub dropped: Vec<String>,
     pub action: Action,
+    /// Whether xcodebuild builds new products: every action but `test-without-building` and
+    /// `clean`, and no action at all (xcodebuild then builds). Archives keep theirs in the archive.
+    pub builds: bool,
     pub scheme: Option<String>,
 }
 
@@ -109,21 +112,19 @@ pub fn parse(argv: &[String]) -> Result<Invocation, ArgError> {
         i += 1;
     }
     let action = action_of(&args);
+    let builds = action != Action::Info && {
+        let named = actions(&args);
+        named.is_empty() || named.iter().any(|a| !["test-without-building", "clean"].contains(a))
+    };
     let scheme = args.iter().position(|a| a == "-scheme").and_then(|p| args.get(p + 1)).cloned();
-    Ok(Invocation { args, dropped, action, scheme })
+    Ok(Invocation { args, dropped, action, builds, scheme })
 }
 
 fn action_of(args: &[String]) -> Action {
     if args.iter().any(|a| INFO_FLAGS.contains(&a.as_str())) {
         return Action::Info;
     }
-    let mut found = Vec::new();
-    for (i, a) in args.iter().enumerate() {
-        let after_value_flag = i > 0 && args[i - 1].starts_with('-') && !BOOL_FLAGS.contains(&args[i - 1].as_str());
-        if ACTIONS.contains(&a.as_str()) && !after_value_flag {
-            found.push(a.as_str());
-        }
-    }
+    let found = actions(args);
     if found.contains(&"archive") {
         Action::Archive
     } else if found.iter().any(|a| a.starts_with("test")) {
@@ -133,14 +134,27 @@ fn action_of(args: &[String]) -> Action {
     }
 }
 
-/// Where an invocation's outputs go, all inside the slot.
+/// The actions named on the command line, skipping words that are an option's value.
+fn actions(args: &[String]) -> Vec<&str> {
+    let mut found = Vec::new();
+    for (i, a) in args.iter().enumerate() {
+        let after_value_flag = i > 0 && args[i - 1].starts_with('-') && !BOOL_FLAGS.contains(&args[i - 1].as_str());
+        if ACTIONS.contains(&a.as_str()) && !after_value_flag {
+            found.push(a.as_str());
+        }
+    }
+    found
+}
+
+/// Where an invocation's outputs go: DerivedData in the slot; the archive and the result bundle in
+/// the worktree's output, which only this worktree's runs replace.
 pub struct Outputs<'a> {
     pub derived_data: &'a str,
     pub archive: &'a str,
     pub result_bundle: &'a str,
 }
 
-/// The only arguments agb adds: the slot's output locations and the compilation cache.
+/// The only arguments agb adds: the output locations and the compilation cache.
 /// They go before the caller's arguments, so a setting the caller passes explicitly wins.
 pub fn injected(action: Action, out: &Outputs, cas_path: &str, cache_limit: &str) -> Vec<String> {
     let mut v = vec!["-derivedDataPath".to_string(), out.derived_data.to_string()];
@@ -231,15 +245,19 @@ mod tests {
     // A1.3
     #[test]
     fn injects_only_the_slot_locations_and_cache_settings() {
-        let out = Outputs { derived_data: "/s/dd", archive: "/s/archives/App.xcarchive", result_bundle: "/s/result.xcresult" };
+        let out = Outputs {
+            derived_data: "/s/DerivedData",
+            archive: "/w/.agent-build/output/App.xcarchive",
+            result_bundle: "/w/.agent-build/output/result.xcresult",
+        };
         let build = injected(Action::Build, &out, "/c/cas", "40G");
         assert_eq!(
             build,
             v(&[
                 "-derivedDataPath",
-                "/s/dd",
+                "/s/DerivedData",
                 "-resultBundlePath",
-                "/s/result.xcresult",
+                "/w/.agent-build/output/result.xcresult",
                 "COMPILATION_CACHE_ENABLE_CACHING=YES",
                 "COMPILATION_CACHE_CAS_PATH=/c/cas",
                 "COMPILATION_CACHE_KEEP_CAS_DIRECTORY=YES",
@@ -248,7 +266,7 @@ mod tests {
             ])
         );
         let archive = injected(Action::Archive, &out, "/c/cas", "40G");
-        assert_eq!(&archive[2..4], &v(&["-archivePath", "/s/archives/App.xcarchive"])[..]);
+        assert_eq!(&archive[2..4], &v(&["-archivePath", "/w/.agent-build/output/App.xcarchive"])[..]);
         assert_eq!(archive.len(), build.len() + 2);
         let info = injected(Action::Info, &out, "/c/cas", "40G");
         assert!(!info.contains(&"-resultBundlePath".to_string()) && info.len() == build.len() - 2, "{info:?}");
@@ -265,6 +283,11 @@ mod tests {
         assert_eq!(action(&["xcodebuild", "clean", "test-without-building"]), Action::Test);
         assert_eq!(action(&["xcodebuild", "-showBuildSettings", "-scheme", "App"]), Action::Info);
         assert_eq!(action(&["xcodebuild", "-list"]), Action::Info);
+        let builds = |s: &[&str]| parse(&v(s)).unwrap().builds;
+        assert!(builds(&["xcodebuild", "-scheme", "App"]) && builds(&["xcodebuild", "build-for-testing"]));
+        assert!(builds(&["xcodebuild", "clean", "build"]) && builds(&["xcodebuild", "archive"]));
+        assert!(!builds(&["xcodebuild", "test-without-building", "-xctestrun", "x"]) && !builds(&["xcodebuild", "clean"]));
+        assert!(!builds(&["xcodebuild", "-list"]));
         assert_eq!(archive_name(Some("My App")), "My-App.xcarchive");
         assert_eq!(archive_name(None), "archive.xcarchive");
     }

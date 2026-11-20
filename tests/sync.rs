@@ -135,7 +135,7 @@ fn the_worktree_is_left_untouched_and_nothing_goes_to_the_network() -> TestResul
 
     let index = || fs::read(clone.join(".git/index")).expect("index");
     let before = (
-        git(&clone, &["status", "--porcelain"]),
+        git(&clone, &["status", "--porcelain", "--untracked-files=all"]),
         git(&clone, &["rev-parse", "HEAD"]),
         index(),
         fs::read(clone.join(".git/config"))?,
@@ -144,7 +144,7 @@ fn the_worktree_is_left_untouched_and_nothing_goes_to_the_network() -> TestResul
     let r = w.build(&clone, &[]);
     assert_eq!(r.code(), 0, "{}", r.all());
     let after = (
-        git(&clone, &["status", "--porcelain"]),
+        git(&clone, &["status", "--porcelain", "--untracked-files=all"]),
         git(&clone, &["rev-parse", "HEAD"]),
         index(),
         fs::read(clone.join(".git/config"))?,

@@ -1,7 +1,7 @@
 //! Steps 1–4 of a run: parse the arguments, find the worktree and its slot, take the slot's lock,
 //! and sync the slot to the worktree. Step 5 and 6 (build, report) are in `build`.
 use crate::build;
-use agent_build_core::config::{self, Config, Dirs};
+use agent_build_core::config::{self, Config};
 use agent_build_core::report::{self, Outcome};
 use agent_build_core::{args, project, slot};
 use agent_build_sys::lock::{LockError, SlotLock};
@@ -15,11 +15,12 @@ pub struct Context {
     pub worktree: PathBuf,
     /// The caller's directory relative to the worktree root, so xcodebuild runs in the same place in the slot.
     pub prefix: String,
-    pub dirs: Dirs,
     pub config: Config,
     pub slot_name: String,
     pub paths: slot::SlotPaths,
-    /// Git-ignored paths the project declares its build needs (`.agent-build.yaml`, precondition P8).
+    /// What this run hands to its caller, in the worktree.
+    pub output: project::Output,
+    /// Git-ignored paths the project declares its build needs (`.agent-build/config.yaml`, precondition P8).
     pub ignored_inputs: Vec<String>,
 }
 
@@ -43,8 +44,8 @@ pub fn run(argv: &[String]) -> Outcome {
         }
     };
     let started = Instant::now();
-    let synced = sync::sync(&ctx.worktree, &ctx.paths.src)
-        .and_then(|_| ignored::sync(&ctx.worktree, &ctx.paths.src, &ctx.ignored_inputs, &ctx.paths.ignored_record));
+    let synced = sync::sync(&ctx.worktree, &ctx.paths.source)
+        .and_then(|_| ignored::sync(&ctx.worktree, &ctx.paths.source, &ctx.ignored_inputs, &ctx.paths.ignored_record));
     if let Err(e) = synced {
         eprintln!("agb: sync failed, nothing was built: {e}");
         return Outcome::SyncFailed;
@@ -76,21 +77,29 @@ fn prepare(argv: &[String]) -> Result<Context, Outcome> {
     let common = git::common_dir(&worktree).map_err(|e| usage(&e.to_string()))?;
     let slot_name = slot::slot_name(git::origin(&worktree).as_deref(), &common.to_string_lossy());
     let paths = slot::slot_paths(&dirs.cache, &slot_name);
-    for (flag, from, to) in args::relocate(&mut inv.args, |p| in_slot(p, &worktree, &paths.src)) {
-        eprintln!("{}", report::relocated_line(&flag, &from, &to));
+    let output = project::output(&worktree);
+    for (flag, from, to) in args::relocate(&mut inv.args, |p| in_slot(p, &cwd, &worktree, &output.dir, &paths.source)) {
+        if Path::new(&to).starts_with(&paths.source) {
+            eprintln!("{}", report::relocated_line(&flag, &from, &to));
+        }
     }
-    Ok(Context { inv, worktree, prefix, dirs, config, slot_name, paths, ignored_inputs })
+    Ok(Context { inv, worktree, prefix, config, slot_name, paths, output, ignored_inputs })
 }
 
-/// The slot's copy of `value` when it is an absolute path inside the worktree, however it is
-/// spelled (through a symbolic link, or not created yet). Relative paths need nothing: xcodebuild
-/// runs in the same directory of the slot.
-fn in_slot(value: &str, worktree: &Path, slot_src: &Path) -> Option<String> {
-    let path = Path::new(value);
-    if !path.is_absolute() {
+/// Where xcodebuild, running in the slot, finds `value`. A path inside the worktree, however it is
+/// spelled (through a symbolic link, or not created yet), becomes the slot's copy. A path into the
+/// worktree's output stays there, as an absolute path: the slot has no copy of it (an `.xctestrun`
+/// from an earlier `build-for-testing`, say). Other relative paths need nothing: xcodebuild runs in
+/// the same directory of the slot.
+fn in_slot(value: &str, cwd: &Path, worktree: &Path, output: &Path, slot_src: &Path) -> Option<String> {
+    let path = cwd.join(value);
+    let real = path.canonicalize().ok().or_else(|| Some(path.parent()?.canonicalize().ok()?.join(path.file_name()?)))?;
+    if real.starts_with(output) {
+        return Path::new(value).is_relative().then(|| real.to_string_lossy().into_owned());
+    }
+    if Path::new(value).is_relative() {
         return None;
     }
-    let real = path.canonicalize().ok().or_else(|| Some(path.parent()?.canonicalize().ok()?.join(path.file_name()?)))?;
     let rest = real.strip_prefix(worktree).ok()?;
     Some(slot_src.join(rest).to_string_lossy().into_owned())
 }

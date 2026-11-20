@@ -111,9 +111,9 @@ fn a_failed_build_is_reported_as_is_once_with_its_exit_code_and_log() -> TestRes
     assert!(!r.stderr().lines().any(|l| l.contains("error: boom") && l.contains("/slots/")), "the error points into the slot: {}", r.all());
     assert!(r.stderr().contains("agb: failed slot="), "{}", r.all());
     assert_eq!(fs::read_to_string(&count)?.lines().count(), 1, "xcodebuild must run exactly once");
-    let logs: Vec<_> = fs::read_dir(w.state().join("logs"))?.collect();
-    assert_eq!(logs.len(), 1);
-    assert!(fs::read_to_string(logs[0].as_ref().map_err(|e| e.to_string())?.path())?.contains("/slots/"), "the log keeps the raw output");
+    let log = a.join(".agent-build/output/build.log");
+    assert!(r.stderr().contains(&format!("log={}", log.display())), "{}", r.all());
+    assert!(fs::read_to_string(&log)?.contains("/slots/"), "the log keeps the raw output");
     Ok(())
 }
 
@@ -156,9 +156,12 @@ fn the_cache_limit_comes_from_the_config_and_a_bad_config_is_refused() {
     assert_eq!(r.code(), 0, "{}", r.all());
     assert!(seen.contains(&"COMPILATION_CACHE_LIMIT_SIZE=20G".to_string()), "{seen:?}");
     let cas = seen.iter().find_map(|a| a.strip_prefix("COMPILATION_CACHE_CAS_PATH=")).unwrap_or_default();
-    assert!(cas.contains("/xdg-cache/agent-build/slots/") && cas.ends_with("/cas"), "the cache is not the project's own: {seen:?}");
+    assert!(
+        cas.contains("/xdg-cache/agent-build/slots/") && cas.ends_with("/CompilationCache"),
+        "the cache is not the project's own: {seen:?}"
+    );
     let dd = seen.iter().position(|a| a == "-derivedDataPath").and_then(|i| seen.get(i + 1)).cloned().unwrap_or_default();
-    assert!(dd.contains("/xdg-cache/agent-build/slots/") && dd.ends_with("/dd"), "{seen:?}");
+    assert!(dd.contains("/xdg-cache/agent-build/slots/") && dd.ends_with("/DerivedData"), "{seen:?}");
     assert_eq!(&seen[seen.len() - 3..], ["build", "-scheme", "App"], "the caller's arguments come last, unchanged");
 
     write(&w.config_file(), "# smaller cache\ncache_limit: 10G\n");
@@ -185,7 +188,7 @@ fn an_absolute_worktree_path_to_the_project_is_built_from_the_slot() -> TestResu
     assert_eq!(r.code(), 0, "{}", r.all());
     let seen = fs::read_to_string(&args)?;
     let value = seen.lines().skip_while(|l| *l != "-workspace").nth(1).unwrap_or_default().to_string();
-    assert!(value.contains("/slots/") && value.ends_with("/src/App.xcworkspace"), "xcodebuild got {value}");
+    assert!(value.contains("/slots/") && value.ends_with("/source/App.xcworkspace"), "xcodebuild got {value}");
     assert!(r.stderr().contains(&format!("agb: -workspace {given} is in the worktree; building the slot's copy")), "{}", r.all());
     Ok(())
 }

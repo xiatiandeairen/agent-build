@@ -12,8 +12,13 @@ here() { pwd -P | sed -E 's#^/private/(var|tmp|etc)/#/\1/#'; }
 if [ -n "$FAKE_CAS_BYTES" ]; then # grow the compilation cache it was given by this many bytes
   for a in "$@"; do case "$a" in COMPILATION_CACHE_CAS_PATH=*) cas="${a#*=}"; mkdir -p "$cas"; head -c "$FAKE_CAS_BYTES" /dev/zero >> "$cas/blob" ;; esac; done
 fi
-if [ -n "$FAKE_XCRESULT" ]; then # make the result bundle xcodebuild was asked for
-  prev=""; for a in "$@"; do [ "$prev" = "-resultBundlePath" ] && mkdir -p "$a"; prev="$a"; done
+if [ -n "$FAKE_XCRESULT" ]; then # make the result bundle xcodebuild was asked for, noting the checkout it built
+  top="$(cd "$(git rev-parse --show-toplevel)" && here)"
+  prev=""; for a in "$@"; do [ "$prev" = "-resultBundlePath" ] && mkdir -p "$a" && echo "$top" > "$a/.src"; prev="$a"; done
+fi
+if [ -n "$FAKE_PRODUCT" ]; then # build a product holding this text, as Xcode would in DerivedData
+  prev=""; for a in "$@"; do [ "$prev" = "-derivedDataPath" ] && dd="$a"; prev="$a"; done
+  mkdir -p "$dd/Build/Products/Debug/App.app" && echo "$FAKE_PRODUCT" > "$dd/Build/Products/Debug/App.app/App"
 fi
 [ -n "$FAKE_SLEEP" ] && sleep "$FAKE_SLEEP"
 [ -n "$FAKE_DONE" ] && touch "$FAKE_DONE"

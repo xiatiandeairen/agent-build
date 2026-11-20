@@ -1,5 +1,5 @@
 //! Steps 5 and 6 of a run: run xcodebuild in the slot with its output locations and the cache,
-//! keep its full output in the log, then report from the result bundle: errors, failed tests,
+//! keep its full output in the worktree's log, then report from the result bundle: errors, failed tests,
 //! preconditions, cache, where the outputs are. Information commands (`-showBuildSettings`, …)
 //! print xcodebuild's output as is instead.
 use crate::app::Context;
@@ -10,28 +10,33 @@ use agent_build_core::xcresult::{self, Severity};
 use agent_build_core::{config, output, project};
 use agent_build_sys::lock::SlotLock;
 use agent_build_sys::run::{self, Ended, Stream};
-use agent_build_sys::{cache, ignored, sync, xcresult as tool};
+use agent_build_sys::{cache, deliver, ignored, sync, xcresult as tool};
 use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::time::Instant;
 
-const KEEP_LOGS: usize = 50;
 /// Lines of raw output shown when a failed build left no result bundle to read.
 const TAIL: usize = 30;
 
 pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
-    let archive = ctx.paths.archives.join(args::archive_name(ctx.inv.scheme.as_deref()));
-    let _ = fs::remove_dir_all(&ctx.paths.result_bundle); // xcodebuild refuses an existing bundle; a missing one is fine
-    let (dd, archive_s, bundle_s) = (text(&ctx.paths.derived_data), text(&archive), text(&ctx.paths.result_bundle));
+    let out = &ctx.output;
+    let archive = out.dir.join(args::archive_name(ctx.inv.scheme.as_deref()));
+    let quiet = ctx.inv.action != Action::Info;
+    // An information command makes no outputs, so it leaves the last build's untouched.
+    let readied = if quiet { deliver::prepare(out, &replaced(ctx)) } else { Ok(()) };
+    if let Err(e) = readied {
+        eprintln!("agb: cannot ready the output directory {}: {e}", out.dir.display());
+        return Outcome::SyncFailed;
+    }
+    let (dd, archive_s, bundle_s) = (text(&ctx.paths.derived_data), text(&archive), text(&out.result_bundle));
     let outputs = Outputs { derived_data: &dd, archive: &archive_s, result_bundle: &bundle_s };
-    let mut argv = args::injected(ctx.inv.action, &outputs, &text(&ctx.paths.cas), &ctx.config.cache_limit);
+    let mut argv = args::injected(ctx.inv.action, &outputs, &text(&ctx.paths.compilation_cache), &ctx.config.cache_limit);
     argv.extend(ctx.inv.args.iter().cloned());
     let program = std::env::var("AGENT_BUILD_XCODEBUILD").unwrap_or_else(|_| "xcodebuild".to_string());
-    let log_path = log_path(ctx);
+    let log_path = quiet.then(|| out.log.clone());
     let log_shown = log_path.as_deref().map(text).unwrap_or_else(|| "(not written)".to_string());
-    let quiet = ctx.inv.action != Action::Info;
     if quiet {
         eprintln!("{}", report::started_line(&ctx.slot_name, &log_shown));
     }
@@ -39,10 +44,10 @@ pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
     if let Some(f) = log_file.as_mut() {
         let _ = writeln!(f, "$ {program} {}", argv.join(" ")); // the log is best effort
     }
-    let (slot_src, worktree) = (text(&ctx.paths.src), text(&ctx.worktree));
+    let (slot_src, worktree) = (text(&ctx.paths.source), text(&ctx.worktree));
     let started = Instant::now();
     let mut tail: VecDeque<String> = VecDeque::with_capacity(TAIL + 1);
-    let ended = run::run(&program, &argv, &ctx.paths.src.join(&ctx.prefix), lock, |stream, line| {
+    let ended = run::run(&program, &argv, &ctx.paths.source.join(&ctx.prefix), lock, |stream, line| {
         if let Some(f) = log_file.as_mut() {
             let _ = writeln!(f, "{line}"); // best effort
         }
@@ -110,9 +115,10 @@ fn read_results(bundle: &Path, action: Action) -> Results {
 /// Report lines, in order: errors, failed tests (or the end of the raw output when a failed
 /// build left nothing to read), phases, P4, top misses, P5, P8, output locations, summary.
 fn finish(ctx: &Context, run: &Run) {
-    let (src, wt) = (text(&ctx.paths.src), text(&ctx.worktree));
+    let (src, wt) = (text(&ctx.paths.source), text(&ctx.worktree));
     let show = |s: &str| output::to_caller(s, &src, &wt).into_owned();
-    let r = read_results(&ctx.paths.result_bundle, ctx.inv.action);
+    let bundle = &ctx.output.result_bundle;
+    let r = read_results(bundle, ctx.inv.action);
     let errors: Vec<&xcresult::Issue> = r.issues.iter().filter(|i| i.severity == Severity::Error).collect();
     for e in &errors {
         eprintln!("{}", report::issue_line(e.location.as_deref().map(show).as_deref(), e.severity, &show(&e.message)));
@@ -129,13 +135,13 @@ fn finish(ctx: &Context, run: &Run) {
         report::phases_line(&r.phases),
         report::p4_line(r.p4.as_deref()),
         report::top_misses_line(&r.cache),
-        report::p5_line(&sync::rewritten_by_build(&ctx.worktree, &ctx.paths.src).unwrap_or_default()),
+        report::p5_line(&sync::rewritten_by_build(&ctx.worktree, &ctx.paths.source).unwrap_or_default()),
         report::p8_line(&missing_ignored(ctx, run, &errors)),
     ];
     lines.into_iter().flatten().for_each(|l| eprintln!("{l}"));
-    let products = text(&ctx.paths.derived_data.join("Build").join("Products"));
-    let bundle = ctx.paths.result_bundle.exists().then(|| text(&ctx.paths.result_bundle));
-    for line in report::output_lines(ctx.inv.action, run.ok, &products, &text(run.archive), bundle.as_deref()) {
+    let products = if run.ok { publish_products(ctx) } else { None };
+    let bundle = bundle.exists().then(|| text(bundle));
+    for line in report::output_lines(ctx.inv.action, run.ok, products.as_deref(), &text(run.archive), bundle.as_deref()) {
         eprintln!("{line}");
     }
     if let Some(line) = clear_cache_over_limit(ctx) {
@@ -160,11 +166,11 @@ fn finish(ctx: &Context, run: &Run) {
 /// own, so no other build is using it.
 fn clear_cache_over_limit(ctx: &Context) -> Option<String> {
     let limit = config::size_bytes(&ctx.config.cache_limit)?;
-    let used = cache::disk_usage(&ctx.paths.cas);
+    let used = cache::disk_usage(&ctx.paths.compilation_cache);
     if used <= limit {
         return None;
     }
-    let cleared = fs::remove_dir_all(&ctx.paths.cas).is_ok();
+    let cleared = fs::remove_dir_all(&ctx.paths.compilation_cache).is_ok();
     Some(report::cache_cleared_line(used, &ctx.config.cache_limit, cleared))
 }
 
@@ -178,19 +184,38 @@ fn missing_ignored(ctx: &Context, run: &Run, errors: &[&xcresult::Issue]) -> Vec
     } else {
         errors.iter().map(|e| format!("{} {}", e.location.as_deref().unwrap_or_default(), e.message)).collect()
     };
-    let mentioned = project::mentioned_paths(texts.iter().map(String::as_str), &text(&ctx.paths.src));
-    ignored::missing_in_slot(&ctx.worktree, &ctx.paths.src, &mentioned)
+    let mentioned = project::mentioned_paths(texts.iter().map(String::as_str), &text(&ctx.paths.source));
+    ignored::missing_in_slot(&ctx.worktree, &ctx.paths.source, &mentioned)
 }
 
-fn log_path(ctx: &Context) -> Option<PathBuf> {
-    let dir = ctx.dirs.state.join("logs");
-    fs::create_dir_all(&dir).ok()?;
-    let names: Vec<String> = fs::read_dir(&dir).ok()?.filter_map(|e| e.ok()?.file_name().into_string().ok()).collect();
-    for old in report::logs_to_delete(names, KEEP_LOGS - 1) {
-        let _ = fs::remove_file(dir.join(old)); // another run may have removed it already
+/// The outputs this run makes anew, removed before it starts so the output directory never mixes
+/// two runs' outputs of one kind: always the result bundle (xcodebuild refuses an existing one) and
+/// the log; the products when it builds them; every archive when it archives.
+fn replaced(ctx: &Context) -> Vec<PathBuf> {
+    let out = &ctx.output;
+    let mut v = vec![out.result_bundle.clone(), out.log.clone()];
+    if ctx.inv.action == Action::Archive {
+        v.extend(deliver::archives(out));
+    } else if ctx.inv.builds {
+        v.push(out.products.clone());
     }
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    Some(dir.join(report::log_file_name(now, std::process::id(), &ctx.slot_name)))
+    v
+}
+
+/// The worktree's copy of the slot's products, made under the slot lock so no other build changes
+/// them halfway; `None` when this run built none or the copy failed (said in a line).
+fn publish_products(ctx: &Context) -> Option<String> {
+    if !ctx.inv.builds || ctx.inv.action == Action::Archive {
+        return None;
+    }
+    match deliver::publish(&ctx.paths.derived_data.join("Build").join("Products"), &ctx.output) {
+        Ok(true) => Some(text(&ctx.output.products)),
+        Ok(false) => None,
+        Err(e) => {
+            eprintln!("agb: cannot copy the products to {}: {e}", ctx.output.products.display());
+            None
+        }
+    }
 }
 
 fn text(p: &Path) -> String {

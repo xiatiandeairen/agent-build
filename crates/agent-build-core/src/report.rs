@@ -1,4 +1,4 @@
-//! The lines agb prints itself, the exit code, and which old logs to remove.
+//! The lines agb prints itself and the exit code.
 //! Every line starts with `agb:` so agents can find them in a long build log.
 use crate::args::Action;
 use crate::xcresult::{CacheStats, Severity};
@@ -102,9 +102,10 @@ pub fn top_misses_line(cache: &CacheStats) -> Option<String> {
     Some(format!("{PREFIX} top misses: {}", top.join(", ")))
 }
 
-/// Where the outputs of this run are. They live in the slot and change on the project's next run.
-/// A failed build points only at its results: its products and archive may be stale or missing.
-pub fn output_lines(action: Action, ok: bool, products: &str, archive: &str, results: Option<&str>) -> Vec<String> {
+/// Where the outputs of this run are: the worktree's output, replaced only by this worktree's
+/// next run that makes the same kind of output. `products` is given only when this run copied them;
+/// a failed build points only at its results.
+pub fn output_lines(action: Action, ok: bool, products: Option<&str>, archive: &str, results: Option<&str>) -> Vec<String> {
     let mut v = Vec::new();
     if let Some(r) = results {
         v.push(format!("{PREFIX} results={r}"));
@@ -112,12 +113,12 @@ pub fn output_lines(action: Action, ok: bool, products: &str, archive: &str, res
     if !ok {
         return v;
     }
-    match action {
-        Action::Archive => v.push(format!("{PREFIX} archive={archive}")),
-        Action::Info => return v,
-        Action::Build | Action::Test => {}
+    if action == Action::Archive {
+        v.push(format!("{PREFIX} archive={archive}"));
     }
-    v.push(format!("{PREFIX} products={products} (valid until this project's next agb run; copy what you keep)"));
+    if let Some(p) = products {
+        v.push(format!("{PREFIX} products={p} (replaced by this worktree's next agb build; copy what you keep)"));
+    }
     v
 }
 
@@ -159,31 +160,6 @@ pub fn exit_code(outcome: Outcome) -> u8 {
         Outcome::Built(code) => u8::try_from(code.clamp(0, 255)).unwrap_or(1),
         Outcome::Signaled(sig) => u8::try_from((128 + sig).clamp(0, 255)).unwrap_or(1),
     }
-}
-
-/// Logs are named so that they sort oldest first; keep the newest `keep`.
-pub fn logs_to_delete(mut names: Vec<String>, keep: usize) -> Vec<String> {
-    names.sort();
-    let excess = names.len().saturating_sub(keep);
-    names.truncate(excess);
-    names
-}
-
-/// `YYYYMMDD-HHMMSS-<pid>-<slot>.log` in UTC, so names sort oldest first.
-pub fn log_file_name(unix_secs: u64, pid: u32, slot: &str) -> String {
-    let days = i64::try_from(unix_secs / 86_400).unwrap_or(0);
-    let secs = unix_secs % 86_400;
-    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!("{year:04}{month:02}{day:02}-{:02}{:02}{:02}-{pid}-{slot}.log", secs / 3600, secs % 3600 / 60, secs % 60)
 }
 
 #[cfg(test)]
@@ -229,19 +205,19 @@ mod tests {
     // A7.7
     #[test]
     fn tells_where_each_action_left_its_output() {
-        let build = output_lines(Action::Build, true, "/s/dd/Build/Products", "/s/archives/App.xcarchive", Some("/s/result.xcresult"));
-        assert_eq!(build[0], "agb: results=/s/result.xcresult");
-        assert!(build[1].contains("products=/s/dd/Build/Products") && build[1].contains("valid until"));
-        assert_eq!(output_lines(Action::Test, true, "/p", "/a", None).len(), 1, "no results line without a bundle");
+        let (p, a, r) =
+            ("/w/.agent-build/output/Products", "/w/.agent-build/output/App.xcarchive", "/w/.agent-build/output/result.xcresult");
+        let build = output_lines(Action::Build, true, Some(p), a, Some(r));
+        assert_eq!(build[0], format!("agb: results={r}"));
+        assert!(build[1].contains(&format!("products={p}")) && build[1].contains("this worktree's next agb build"));
+        assert_eq!(output_lines(Action::Test, true, Some(p), a, None).len(), 1, "no results line without a bundle");
+        assert_eq!(output_lines(Action::Test, true, None, a, Some(r)), [format!("agb: results={r}")], "nothing built, no products");
+        assert_eq!(output_lines(Action::Archive, true, None, a, None), [format!("agb: archive={a}")]);
+        assert!(output_lines(Action::Info, true, None, a, None).is_empty());
         assert_eq!(
-            output_lines(Action::Archive, true, "/p", "/s/archives/App.xcarchive", None)[0],
-            "agb: archive=/s/archives/App.xcarchive"
-        );
-        assert!(output_lines(Action::Info, true, "/p", "/a", None).is_empty());
-        assert_eq!(
-            output_lines(Action::Archive, false, "/p", "/a", Some("/s/r.xcresult")),
-            ["agb: results=/s/r.xcresult"],
-            "a failed build has no products to point at"
+            output_lines(Action::Build, false, Some(p), a, Some(r)),
+            [format!("agb: results={r}")],
+            "a failed build has no products"
         );
     }
 
@@ -263,16 +239,5 @@ mod tests {
         assert_eq!(exit_code(Outcome::Built(65)), 65);
         assert_eq!(exit_code(Outcome::Signaled(15)), 143);
         assert_eq!(exit_code(Outcome::Built(300)), 255);
-    }
-
-    // A7.8
-    #[test]
-    fn keeps_only_the_newest_logs() {
-        let names = ["20261119-120000-a.log", "20261118-090000-a.log", "20261120-080000-b.log"].map(String::from).to_vec();
-        assert_eq!(logs_to_delete(names.clone(), 2), ["20261118-090000-a.log"]);
-        assert!(logs_to_delete(names, 5).is_empty());
-        assert_eq!(log_file_name(0, 7, "s"), "19700101-000000-7-s.log");
-        assert_eq!(log_file_name(1_795_115_660, 42, "app-1a2b3c4d"), "20261119-191420-42-app-1a2b3c4d.log");
-        assert_eq!(log_file_name(951_782_400, 1, "s"), "20000229-000000-1-s.log");
     }
 }

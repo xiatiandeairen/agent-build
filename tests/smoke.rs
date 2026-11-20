@@ -57,6 +57,7 @@ fn a_standard_project_builds_and_tests_without_any_configuration() {
     assert_eq!(build.code(), 0, "{}", build.all());
     assert!(build.stderr().contains("agb: ok slot=SampleApp-"), "{}", build.all());
     let products = line_value(&build.stderr(), "products").expect("products line");
+    assert_eq!(products, app.join(".agent-build/output/Products"), "the products are not in the worktree's output");
     assert!(products.join("Debug-iphonesimulator/App.app").is_dir(), "no App.app under {}", products.display());
 
     let test = real(
@@ -94,8 +95,9 @@ fn a_workspace_with_a_local_mixed_package_in_a_subdirectory_builds_incrementally
     let first = build();
     assert_eq!(first.code(), 0, "{}", first.all());
     let products = line_value(&first.stderr(), "products").expect("products line");
+    assert_eq!(products, repo.join(".agent-build/output/Products"), "the products are not in the worktree's output");
     assert!(products.join("Debug-iphonesimulator/App.app").is_dir(), "no App.app under {}", products.display());
-    let again = build();
+    let again = build(); // with the output now inside the worktree
     assert!(again.stderr().contains(" miss=0 "), "an unchanged rebuild redid cached work: {}", again.all());
 
     let header = ios.join("Packages/Core/Sources/CoreObjC/include/CoreObjC.h");
@@ -159,26 +161,26 @@ fn package_tests_in_the_package_directory_name_failures_and_leave_the_app_build_
 // A14
 #[test]
 #[ignore = "runs the real xcodebuild; use `just smoke`"]
-fn tests_built_once_run_later_from_their_xctestrun() {
+fn tests_built_once_run_later_from_their_xctestrun_whatever_another_worktree_builds_between() {
     let w = World::new("smoke-xctestrun");
-    let app = checkout("SampleApp", &w.path("SampleApp"));
-    let build_for_testing = || {
-        let r = real(
-            &w,
-            &app,
-            &[
-                "xcodebuild",
-                "build-for-testing",
-                "-project",
-                "SampleApp.xcodeproj",
-                "-scheme",
-                "CoreTests",
-                "-destination",
-                "platform=macOS",
-            ],
-        );
+    let a = checkout("SampleApp", &w.path("SampleApp"));
+    let b = w.path("SampleApp-b");
+    git(&a, &["worktree", "add", "-q", "-b", "other", &b.to_string_lossy()]);
+    let build_for_testing = |dir: &Path| {
+        let args = [
+            "xcodebuild",
+            "build-for-testing",
+            "-project",
+            "SampleApp.xcodeproj",
+            "-scheme",
+            "CoreTests",
+            "-destination",
+            "platform=macOS",
+        ];
+        let r = real(&w, dir, &args);
         assert_eq!(r.code(), 0, "{}", r.all());
         let products = line_value(&r.stderr(), "products").expect("products line");
+        assert_eq!(products, dir.join(".agent-build/output/Products"), "the products are not in the worktree's output");
         let found = fs::read_dir(&products)
             .expect("products dir")
             .filter_map(Result::ok)
@@ -186,24 +188,23 @@ fn tests_built_once_run_later_from_their_xctestrun() {
             .find(|p| p.extension().is_some_and(|x| x == "xctestrun"));
         found.unwrap_or_else(|| panic!("no .xctestrun in {}", products.display()))
     };
-    let run = |xctestrun: &Path| {
-        real(
-            &w,
-            &app,
-            &["xcodebuild", "test-without-building", "-xctestrun", &xctestrun.to_string_lossy(), "-destination", "platform=macOS"],
-        )
+    let run = |dir: &Path, xctestrun: &Path| {
+        let given = xctestrun.to_string_lossy();
+        real(&w, dir, &["xcodebuild", "test-without-building", "-xctestrun", &given, "-destination", "platform=macOS"])
     };
 
-    let passing = run(&build_for_testing());
-    assert_eq!(passing.code(), 0, "{}", passing.all());
-    assert!(line_value(&passing.stderr(), "results").is_some_and(|p| p.exists()), "{}", passing.all());
-
-    let tests = app.join("Tests/CoreTests.swift");
+    let tests = a.join("Tests/CoreTests.swift");
     let original = fs::read_to_string(&tests).expect("read tests");
     fs::write(&tests, original.replace("XCTAssertEqual(1 + 1, 2)", "XCTAssertEqual(1 + 1, 3)")).expect("write tests");
-    let failing = run(&build_for_testing());
-    assert_eq!(failing.code(), 65, "{}", failing.all());
+    let broken = build_for_testing(&a);
+    let sound = build_for_testing(&b); // the same project's slot now holds B's build
+
+    let failing = run(&a, &broken);
+    assert_eq!(failing.code(), 65, "A ran B's tests: {}", failing.all());
     assert!(failing.stderr().lines().any(|l| l.starts_with("agb: test failed: ") && l.contains("testAddition")), "{}", failing.all());
+    assert!(line_value(&failing.stderr(), "results").is_some_and(|p| p.exists()), "{}", failing.all());
+    let passing = run(&b, &sound);
+    assert_eq!(passing.code(), 0, "B ran A's tests: {}", passing.all());
 }
 
 // A17
@@ -229,5 +230,6 @@ fn an_unsigned_archive_lands_where_agb_says() {
     );
     assert_eq!(r.code(), 0, "{}", r.all());
     let archive = line_value(&r.stderr(), "archive").expect("archive line");
+    assert_eq!(archive, app.join(".agent-build/output/App.xcarchive"), "the archive is not in the worktree's output");
     assert!(archive.join("Products/Applications/App.app").is_dir(), "no App.app in {}", archive.display());
 }

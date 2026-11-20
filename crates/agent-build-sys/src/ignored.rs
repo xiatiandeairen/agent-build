@@ -1,4 +1,4 @@
-//! Git-ignored paths: the ones a project declares in `.agent-build.yaml` are mirrored into the
+//! Git-ignored paths: the ones a project declares in `.agent-build/config.yaml` are mirrored into the
 //! slot like tracked files (only differing files written, extras removed); the ones it does not
 //! declare are named when a failed build was looking for them (precondition P8).
 use crate::git;

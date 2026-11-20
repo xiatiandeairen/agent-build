@@ -1,6 +1,7 @@
 //! The outside world: git, file copying, the slot lock, running xcodebuild and signals.
 //! No decisions here; the rules live in `agent-build-core`.
 pub mod cache;
+pub mod deliver;
 mod ffi;
 pub mod git;
 pub mod ignored;

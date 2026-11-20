@@ -36,19 +36,15 @@ impl World {
         self.root.join("xdg-cache/agent-build")
     }
 
-    pub fn state(&self) -> PathBuf {
-        self.root.join("xdg-state/agent-build")
-    }
-
     pub fn config_file(&self) -> PathBuf {
         self.root.join("xdg-config/agent-build/config.yaml")
     }
 
-    /// The single slot's `src` directory (fails if there is not exactly one slot).
+    /// The single slot's `source` directory (fails if there is not exactly one slot).
     pub fn slot_src(&self) -> PathBuf {
         let slots: Vec<PathBuf> = fs::read_dir(self.cache().join("slots")).expect("slots dir").map(|e| e.expect("entry").path()).collect();
         assert_eq!(slots.len(), 1, "expected one slot, found {slots:?}");
-        slots[0].join("src")
+        slots[0].join("source")
     }
 
     pub fn command(&self, cwd: &Path, env: &[(&str, String)]) -> Command {
