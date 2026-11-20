@@ -61,7 +61,7 @@ fn usage(message: &str) -> Outcome {
 }
 
 fn prepare(argv: &[String]) -> Result<Context, Outcome> {
-    let inv = args::parse(argv).map_err(|e| usage(&e.message()))?;
+    let mut inv = args::parse(argv).map_err(|e| usage(&e.message()))?;
     for d in &inv.dropped {
         eprintln!("{}", report::dropped_line(d));
     }
@@ -76,7 +76,23 @@ fn prepare(argv: &[String]) -> Result<Context, Outcome> {
     let common = git::common_dir(&worktree).map_err(|e| usage(&e.to_string()))?;
     let slot_name = slot::slot_name(git::origin(&worktree).as_deref(), &common.to_string_lossy());
     let paths = slot::slot_paths(&dirs.cache, &slot_name);
+    for (flag, from, to) in args::relocate(&mut inv.args, |p| in_slot(p, &worktree, &paths.src)) {
+        eprintln!("{}", report::relocated_line(&flag, &from, &to));
+    }
     Ok(Context { inv, worktree, prefix, dirs, config, slot_name, paths, ignored_inputs })
+}
+
+/// The slot's copy of `value` when it is an absolute path inside the worktree, however it is
+/// spelled (through a symbolic link, or not created yet). Relative paths need nothing: xcodebuild
+/// runs in the same directory of the slot.
+fn in_slot(value: &str, worktree: &Path, slot_src: &Path) -> Option<String> {
+    let path = Path::new(value);
+    if !path.is_absolute() {
+        return None;
+    }
+    let real = path.canonicalize().ok().or_else(|| Some(path.parent()?.canonicalize().ok()?.join(path.file_name()?)))?;
+    let rest = real.strip_prefix(worktree).ok()?;
+    Some(slot_src.join(rest).to_string_lossy().into_owned())
 }
 
 /// An optional YAML file: `None` when it does not exist; a parse error names the file and line.

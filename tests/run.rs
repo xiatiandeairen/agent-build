@@ -168,3 +168,21 @@ fn the_cache_limit_comes_from_the_config_and_a_bad_config_is_refused() {
     assert!(r.stderr().contains("config.yaml: line 2: unknown key `slots`"), "{}", r.all());
     assert!(seen.is_empty(), "xcodebuild ran with a bad config");
 }
+
+// A1.7
+#[test]
+fn an_absolute_worktree_path_to_the_project_is_built_from_the_slot() -> TestResult {
+    let w = World::new("abspath");
+    let a = repo(&w.path("app"));
+    // Spelled through the /var -> /private/var link, as `$PWD` often is.
+    let given = a.to_string_lossy().replacen("/private/var/", "/var/", 1) + "/App.xcworkspace";
+    let args = w.path("args");
+    let r =
+        w.run(&a, &["xcodebuild", "build", "-workspace", &given, "-scheme", "App"], &[("FAKE_ARGS", args.to_string_lossy().into_owned())]);
+    assert_eq!(r.code(), 0, "{}", r.all());
+    let seen = fs::read_to_string(&args)?;
+    let value = seen.lines().skip_while(|l| *l != "-workspace").nth(1).unwrap_or_default().to_string();
+    assert!(value.contains("/slots/") && value.ends_with("/src/App.xcworkspace"), "xcodebuild got {value}");
+    assert!(r.stderr().contains(&format!("agb: -workspace {given} is in the worktree; building the slot's copy")), "{}", r.all());
+    Ok(())
+}

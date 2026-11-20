@@ -125,6 +125,10 @@ pub fn dropped_line(flag_and_value: &str) -> String {
     format!("{PREFIX} ignored {flag_and_value}: output locations are managed by agb")
 }
 
+pub fn relocated_line(flag: &str, from: &str, to: &str) -> String {
+    format!("{PREFIX} {flag} {from} is in the worktree; building the slot's copy {to}")
+}
+
 pub fn waiting_line(owner: &str) -> String {
     format!("{PREFIX} waiting for the slot: {owner}")
 }

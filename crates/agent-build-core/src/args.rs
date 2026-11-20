@@ -46,15 +46,27 @@ impl ArgError {
     }
 }
 
-const DROPPED: [&str; 3] = ["-derivedDataPath", "-archivePath", "-resultBundlePath"];
+const DROPPED: [&str; 4] = ["-derivedDataPath", "-archivePath", "-resultBundlePath", "-clonedSourcePackagesDirPath"];
 const UNSUPPORTED: [&str; 1] = ["-exportArchive"];
 const ACTIONS: [&str; 10] =
     ["build", "test", "archive", "clean", "analyze", "build-for-testing", "test-without-building", "install", "installsrc", "docbuild"];
 /// Flags that make xcodebuild print information instead of building.
-const INFO_FLAGS: [&str; 9] =
-    ["-list", "-showBuildSettings", "-showdestinations", "-showsdks", "-showTestPlans", "-version", "-help", "-usage", "-showComponent"];
+/// `-resolvePackageDependencies` builds nothing either; its package checkouts land in the slot's DerivedData.
+const INFO_FLAGS: [&str; 10] = [
+    "-list",
+    "-showBuildSettings",
+    "-showdestinations",
+    "-showsdks",
+    "-showTestPlans",
+    "-version",
+    "-help",
+    "-usage",
+    "-showComponent",
+    "-resolvePackageDependencies",
+];
 /// Flags that take no value: a bare word after them can still be an action.
-const BOOL_FLAGS: [&str; 16] = [
+const BOOL_FLAGS: [&str; 17] = [
+    "-resolvePackageDependencies",
     "-quiet",
     "-verbose",
     "-json",
@@ -148,6 +160,24 @@ pub fn injected(action: Action, out: &Outputs, cas_path: &str, cache_limit: &str
     v
 }
 
+/// Flags whose value is a path xcodebuild builds from.
+const PATH_FLAGS: [&str; 3] = ["-workspace", "-project", "-xctestrun"];
+
+/// Points the values of `-workspace`, `-project` and `-xctestrun` that `to_slot` maps (paths inside
+/// the worktree) at the slot, so the slot's copy is built. Returns each change as (flag, from, to).
+pub fn relocate(args: &mut [String], to_slot: impl Fn(&str) -> Option<String>) -> Vec<(String, String, String)> {
+    let mut moved = Vec::new();
+    for i in 1..args.len() {
+        if !PATH_FLAGS.contains(&args[i - 1].as_str()) {
+            continue;
+        }
+        if let Some(to) = to_slot(&args[i]) {
+            moved.push((args[i - 1].clone(), std::mem::replace(&mut args[i], to.clone()), to));
+        }
+    }
+    moved
+}
+
 /// File name for an archive: the scheme, made safe for a path.
 pub fn archive_name(scheme: Option<&str>) -> String {
     let base: String =
@@ -237,5 +267,53 @@ mod tests {
         assert_eq!(action(&["xcodebuild", "-list"]), Action::Info);
         assert_eq!(archive_name(Some("My App")), "My-App.xcarchive");
         assert_eq!(archive_name(None), "archive.xcarchive");
+    }
+
+    // A1.6
+    #[test]
+    fn resolving_packages_is_an_information_command() {
+        let action = |s: &[&str]| parse(&v(s)).unwrap().action;
+        assert_eq!(action(&["xcodebuild", "-resolvePackageDependencies"]), Action::Info);
+        assert_eq!(action(&["xcodebuild", "-resolvePackageDependencies", "-workspace", "W.xcworkspace", "-scheme", "App"]), Action::Info);
+    }
+
+    // A1.8
+    #[test]
+    fn package_checkouts_stay_in_the_slot() {
+        let inv = parse(&v(&["xcodebuild", "build", "-clonedSourcePackagesDirPath", "/tmp/spm", "-scheme", "App"])).unwrap();
+        assert_eq!(inv.args, v(&["build", "-scheme", "App"]));
+        assert_eq!(inv.dropped, v(&["-clonedSourcePackagesDirPath /tmp/spm"]));
+    }
+
+    // A1.7
+    #[test]
+    fn worktree_paths_given_to_xcodebuild_point_into_the_slot() {
+        let mut args = v(&["build", "-workspace", "/w/ios/App.xcworkspace", "-project", "/elsewhere/P.xcodeproj", "-scheme", "/w/x"]);
+        args.extend(v(&["-xctestrun", "/w/dd/T.xctestrun", "-project", "Rel.xcodeproj"]));
+        let to_slot = |p: &str| p.strip_prefix("/w/").map(|rest| format!("/s/src/{rest}"));
+        let moved = relocate(&mut args, to_slot);
+        assert_eq!(
+            args,
+            v(&[
+                "build",
+                "-workspace",
+                "/s/src/ios/App.xcworkspace",
+                "-project",
+                "/elsewhere/P.xcodeproj",
+                "-scheme",
+                "/w/x",
+                "-xctestrun",
+                "/s/src/dd/T.xctestrun",
+                "-project",
+                "Rel.xcodeproj"
+            ])
+        );
+        assert_eq!(
+            moved,
+            [
+                ("-workspace".to_string(), "/w/ios/App.xcworkspace".to_string(), "/s/src/ios/App.xcworkspace".to_string()),
+                ("-xctestrun".to_string(), "/w/dd/T.xctestrun".to_string(), "/s/src/dd/T.xctestrun".to_string()),
+            ]
+        );
     }
 }
