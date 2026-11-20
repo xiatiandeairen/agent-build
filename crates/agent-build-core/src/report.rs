@@ -93,8 +93,8 @@ pub enum Outcome {
 
 pub fn exit_code(outcome: Outcome) -> u8 {
     match outcome {
-        Outcome::Usage => 2,
-        Outcome::SyncFailed => 3,
+        Outcome::Usage => 64,       // EX_USAGE, what xcodebuild itself exits with for bad arguments
+        Outcome::SyncFailed => 125, // the wrapper itself failed, as with env and timeout
         Outcome::Built(code) => u8::try_from(code.clamp(0, 255)).unwrap_or(1),
         Outcome::Signaled(sig) => u8::try_from((128 + sig).clamp(0, 255)).unwrap_or(1),
     }
@@ -166,8 +166,8 @@ mod tests {
     // A6.1
     #[test]
     fn exit_codes_say_what_went_wrong() {
-        assert_eq!(exit_code(Outcome::Usage), 2);
-        assert_eq!(exit_code(Outcome::SyncFailed), 3);
+        assert_eq!(exit_code(Outcome::Usage), 64);
+        assert_eq!(exit_code(Outcome::SyncFailed), 125);
         assert_eq!(exit_code(Outcome::Built(0)), 0);
         assert_eq!(exit_code(Outcome::Built(65)), 65);
         assert_eq!(exit_code(Outcome::Signaled(15)), 143);

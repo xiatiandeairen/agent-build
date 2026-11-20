@@ -12,7 +12,7 @@ fn outside_a_git_repository_it_refuses_and_creates_nothing() {
     let dir = w.path("plain");
     fs::create_dir_all(&dir).expect("mkdir");
     let r = w.build(&dir, &[]);
-    assert_eq!(r.code(), 2, "{}", r.all());
+    assert_eq!(r.code(), 64, "{}", r.all());
     assert!(r.stderr().contains("inside a git repository"), "{}", r.all());
     assert!(!w.cache().join("slots").exists());
 }

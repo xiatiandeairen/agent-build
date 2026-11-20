@@ -117,7 +117,7 @@ fn a_failed_build_is_reported_as_is_once_with_its_exit_code_and_log() -> TestRes
 
 // A6
 #[test]
-fn a_failed_sync_exits_3_without_building_and_the_next_run_recovers() -> TestResult {
+fn a_failed_sync_exits_125_without_building_and_the_next_run_recovers() -> TestResult {
     let w = World::new("syncfail");
     let a = repo(&w.path("app"));
     let count = w.path("count");
@@ -128,7 +128,7 @@ fn a_failed_sync_exits_3_without_building_and_the_next_run_recovers() -> TestRes
     assert!(chmod("a-w")?);
     write(&a.join("App/A.swift"), "let a = 2\n");
     let r = w.build(&a, &env);
-    assert_eq!(r.code(), 3, "{}", r.all());
+    assert_eq!(r.code(), 125, "{}", r.all());
     assert!(r.stderr().contains("sync failed, nothing was built"), "{}", r.all());
     assert_eq!(fs::read_to_string(&count)?.lines().count(), 1, "xcodebuild ran although sync failed");
     assert!(chmod("u+w")?);
@@ -204,7 +204,7 @@ fn the_cache_limit_comes_from_the_config_and_a_bad_config_is_refused() {
 
     write(&w.config_file(), "cache_limit: 20G\nslots: 3\n");
     let (r, seen) = args_seen(&w, &a);
-    assert_eq!(r.code(), 2, "{}", r.all());
+    assert_eq!(r.code(), 64, "{}", r.all());
     assert!(r.stderr().contains("config.yaml: line 2: unknown key `slots`"), "{}", r.all());
     assert!(seen.is_empty(), "xcodebuild ran with a bad config");
 }
