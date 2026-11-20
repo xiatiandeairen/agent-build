@@ -74,7 +74,7 @@ fn submodule(src: &Path, dst: &Path) -> io::Result<usize> {
     Ok(0)
 }
 
-fn remove(path: &Path) -> io::Result<()> {
+pub(crate) fn remove(path: &Path) -> io::Result<()> {
     match fs::symlink_metadata(path) {
         Ok(m) if m.is_dir() => fs::remove_dir_all(path),
         Ok(_) => fs::remove_file(path),

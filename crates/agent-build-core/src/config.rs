@@ -53,7 +53,7 @@ pub fn parse(text: &str) -> Result<Config, ConfigError> {
     Ok(config)
 }
 
-fn strip_comment(line: &str) -> &str {
+pub(crate) fn strip_comment(line: &str) -> &str {
     if line.trim_start().starts_with('#') {
         return "";
     }
@@ -63,7 +63,7 @@ fn strip_comment(line: &str) -> &str {
     }
 }
 
-fn unquote(v: &str) -> &str {
+pub(crate) fn unquote(v: &str) -> &str {
     for q in ['"', '\''] {
         if v.len() >= 2 && v.starts_with(q) && v.ends_with(q) {
             return &v[1..v.len() - 1];

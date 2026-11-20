@@ -50,6 +50,17 @@ pub fn p5_line(files: &[String]) -> Option<String> {
     })
 }
 
+/// Git-ignored files a failed build looked for: sync does not carry them unless the project declares them.
+pub fn p8_line(files: &[String]) -> Option<String> {
+    (!files.is_empty()).then(|| {
+        format!(
+            "{PREFIX} precondition P8 not met: the build needs git-ignored files, which are not in the slot: {} — list them under ignored_inputs in {}",
+            files.join(", "),
+            crate::project::FILE
+        )
+    })
+}
+
 pub fn top_misses_line(cache: &CacheStats) -> Option<String> {
     if cache.misses == 0 {
         return None;

@@ -103,3 +103,8 @@ pub fn clone_local(from_git_dir: &Path, to: &Path) -> io::Result<()> {
     std::fs::create_dir_all(parent)?;
     git(parent, &["clone", "-q", "--no-checkout", &from_git_dir.to_string_lossy(), &to.to_string_lossy()], None).map(drop)
 }
+
+/// Whether git ignores `path` (relative to the worktree root) in this worktree.
+pub fn is_ignored(worktree: &Path, path: &str) -> bool {
+    git(worktree, &["check-ignore", "-q", "--", path], None).is_ok()
+}

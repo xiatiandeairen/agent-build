@@ -2,6 +2,7 @@
 //! No decisions here; the rules live in `agent-build-core`.
 mod ffi;
 pub mod git;
+pub mod ignored;
 pub mod lock;
 pub mod run;
 pub mod signals;

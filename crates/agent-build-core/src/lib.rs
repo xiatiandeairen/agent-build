@@ -5,6 +5,7 @@ pub mod args;
 pub mod config;
 pub mod log;
 pub mod output;
+pub mod project;
 pub mod report;
 pub mod slot;
 pub mod status;

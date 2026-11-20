@@ -2,10 +2,10 @@
 //! show its output with worktree paths, keep the full log, then report what happened.
 use crate::app::Context;
 use agent_build_core::report::{self, Outcome, Summary};
-use agent_build_core::{args, log, output, slot};
+use agent_build_core::{args, log, output, project, slot};
 use agent_build_sys::lock::SlotLock;
 use agent_build_sys::run::{self, Ended, Stream};
-use agent_build_sys::sync;
+use agent_build_sys::{ignored, sync};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -72,12 +72,17 @@ pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
     outcome
 }
 
-/// Report lines, in order: phases, P4, top misses, P5, output locations, summary.
+/// Report lines, in order: phases, P4, top misses, P5, P8 (failed builds only), output locations, summary.
 fn finish(ctx: &Context, lines: &[(f64, String)], archive: &Path, summary: Summary) {
     let plain = || lines.iter().map(|(_, l)| l.as_str());
     let stamped: Vec<(f64, &str)> = lines.iter().map(|(t, l)| (*t, l.as_str())).collect();
     let cache = log::cache_stats(plain());
     let rewritten = sync::rewritten_by_build(&ctx.worktree, &ctx.paths.src).unwrap_or_default();
+    let missing = if summary.ok {
+        Vec::new()
+    } else {
+        ignored::missing_in_slot(&ctx.worktree, &ctx.paths.src, &project::mentioned_paths(plain(), &text(&ctx.paths.src)))
+    };
     let products = ctx.paths.derived_data.join("Build").join("Products");
     let xcresult = log::xcresult_path(plain()).map(|p| output::to_caller(&p, &text(&ctx.paths.src), &text(&ctx.worktree)).into_owned());
     let report = [
@@ -85,6 +90,7 @@ fn finish(ctx: &Context, lines: &[(f64, String)], archive: &Path, summary: Summa
         report::p4_line(&log::p4_targets(plain())),
         report::top_misses_line(&cache),
         report::p5_line(&rewritten),
+        report::p8_line(&missing),
     ];
     for line in report.into_iter().flatten() {
         eprintln!("{line}");

@@ -37,6 +37,8 @@ pub struct SlotPaths {
     pub lock: PathBuf,
     /// Who holds the lock, for the waiting message.
     pub owner: PathBuf,
+    /// The ignored inputs the last run mirrored, so paths no longer declared are removed.
+    pub ignored_record: PathBuf,
 }
 
 pub fn slot_paths(cache_dir: &Path, name: &str) -> SlotPaths {
@@ -47,6 +49,7 @@ pub fn slot_paths(cache_dir: &Path, name: &str) -> SlotPaths {
         archives: root.join("archives"),
         lock: root.join("lock"),
         owner: root.join("owner"),
+        ignored_record: root.join("ignored_inputs"),
         root,
     }
 }

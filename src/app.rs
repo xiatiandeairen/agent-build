@@ -3,9 +3,9 @@
 use crate::build;
 use agent_build_core::config::{self, Config, Dirs};
 use agent_build_core::report::{self, Outcome};
-use agent_build_core::{args, slot};
+use agent_build_core::{args, project, slot};
 use agent_build_sys::lock::{LockError, SlotLock};
-use agent_build_sys::{git, signals, sync};
+use agent_build_sys::{git, ignored, signals, sync};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{env, fs, io};
@@ -19,6 +19,8 @@ pub struct Context {
     pub config: Config,
     pub slot_name: String,
     pub paths: slot::SlotPaths,
+    /// Git-ignored paths the project declares its build needs (`.agent-build.yaml`, precondition P8).
+    pub ignored_inputs: Vec<String>,
 }
 
 pub fn run(argv: &[String]) -> Outcome {
@@ -41,7 +43,9 @@ pub fn run(argv: &[String]) -> Outcome {
         }
     };
     let started = Instant::now();
-    if let Err(e) = sync::sync(&ctx.worktree, &ctx.paths.src) {
+    let synced = sync::sync(&ctx.worktree, &ctx.paths.src)
+        .and_then(|_| ignored::sync(&ctx.worktree, &ctx.paths.src, &ctx.ignored_inputs, &ctx.paths.ignored_record));
+    if let Err(e) = synced {
         eprintln!("agb: sync failed, nothing was built: {e}");
         return Outcome::SyncFailed;
     }
@@ -66,17 +70,19 @@ fn prepare(argv: &[String]) -> Result<Context, Outcome> {
     git::head(&worktree).map_err(|_| usage("the repository has no commit yet"))?;
     let prefix = git::prefix(&cwd).unwrap_or_default();
     let dirs = config::dirs(|k| env::var(k).ok()).ok_or_else(|| usage("HOME is not set"))?;
-    let config = load_config(&dirs.config.join("config.yaml"))?;
+    let config = load_yaml(&dirs.config.join("config.yaml"), config::parse)?.unwrap_or_default();
+    let ignored_inputs = load_yaml(&worktree.join(project::FILE), project::parse)?.unwrap_or_default();
     let common = git::common_dir(&worktree).map_err(|e| usage(&e.to_string()))?;
     let slot_name = slot::slot_name(git::origin(&worktree).as_deref(), &common.to_string_lossy());
     let paths = slot::slot_paths(&dirs.cache, &slot_name);
-    Ok(Context { inv, worktree, prefix, dirs, config, slot_name, paths })
+    Ok(Context { inv, worktree, prefix, dirs, config, slot_name, paths, ignored_inputs })
 }
 
-fn load_config(path: &Path) -> Result<Config, Outcome> {
+/// An optional YAML file: `None` when it does not exist; a parse error names the file and line.
+fn load_yaml<T>(path: &Path, parse: impl Fn(&str) -> Result<T, config::ConfigError>) -> Result<Option<T>, Outcome> {
     match fs::read_to_string(path) {
-        Ok(text) => config::parse(&text).map_err(|e| usage(&format!("{}: {e}", path.display()))),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Config::default()),
+        Ok(text) => parse(&text).map(Some).map_err(|e| usage(&format!("{}: {e}", path.display()))),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(usage(&format!("cannot read {}: {e}", path.display()))),
     }
 }
