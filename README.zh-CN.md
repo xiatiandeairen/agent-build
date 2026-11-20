@@ -2,7 +2,7 @@
 
 [English](README.md) · 简体中文
 
-给"一台机器上多个 agent、多个 worktree 频繁编译"的场景，以及 CI，用的 Xcode 命令行快速编译。在原来的 `xcodebuild` 命令前加上 `agb`：
+给"一台机器上多个 agent、多个 worktree 频繁编译"的场景，以及 CI，用的 Xcode 和 Cargo 命令行快速编译。在原来的 `xcodebuild`（或 `cargo`，见[下文](#rustagb-cargo)）命令前加上 `agb`：
 
 ```bash
 cd my-app            # 项目的任意一个 worktree
@@ -38,6 +38,22 @@ agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 erro
 - 退出码：编译结果原样返回 xcodebuild 的；参数错误为 64（与 xcodebuild 自己的参数错误相同）；同步槽失败为 125（这时没有编译；125 沿用 `env`、`timeout` 表示"包装器自己失败"的惯例）。
 
 同一项目的两个编译会排队：后到的会输出在等谁，等前一个结束后在热槽上增量编译。不同项目互不等待。机器上同时跑几个编译，交给你的排队工具（例如 [agent-quay](https://github.com/xiatiandeairen/agent-quay)）。CI 用同一条命令，把 runner 配成同一项目不并发即可。
+
+## Rust：`agb cargo`
+
+Cargo 项目用同一套槽、同步、槽锁和 output。在 `cargo` 前加上 `agb`：
+
+```bash
+agb cargo build --release -p core-ffi --target aarch64-apple-ios
+agb cargo test
+```
+
+- cargo 在槽里运行，用槽里的 `target/`，Cargo 自己的增量编译就能从一个 worktree 延续到另一个。只接受 `build`、`check`、`test`、`bench`、`run`、`doc`、`clippy`、`rustc`、`clean`；改文件（`fmt`、`fix`、`add`、`update`）、安装、发布和只读查询的子命令返回退出码 64，请直接用 cargo。
+- `--target-dir`、`--message-format` 和 `CARGO_TARGET_DIR` 由 agb 接管，传了会被丢掉并提示。
+- rustc 不经过 wrapper（kache、sccache）：rustc wrapper 相关的环境变量设为空，也盖过 Cargo 配置里的 `build.rustc-wrapper`。wrapper 的缓存 key 可能漏掉影响结果的输入，复用只由 Cargo 自己判断。
+- `build`、`rustc` 成功后，你要求的包的产物（`.a`、`.dylib`、程序）拷到 `.agent-build/output/target/`，路径和 target 目录里一样，例如 `.agent-build/output/target/aarch64-apple-ios/release/libcore_ffi.a`。cargo 之后的出包步骤（生成绑定、`lipo`、打 xcframework）从这里读。
+- 编完输出：错误按 `路径:行:列: error: 信息`（rustc 的完整文字在日志里）、失败的测试、`agb: rebuilt: <重编的本项目包>`，以及带 Cargo 自己计数 `units fresh=… rebuilt=…` 的汇总行。
+- 在 P3、P5、P8 之外的前提：编译结果只取决于源码、`Cargo.lock`、工具链和构建脚本声明过的输入（`rerun-if-changed`、`rerun-if-env-changed`）。
 
 ## 设定前提
 

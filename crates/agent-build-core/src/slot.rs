@@ -36,6 +36,8 @@ pub struct SlotPaths {
     pub derived_data: PathBuf,
     /// The project's own compilation cache; cleared after a build that left it over `cache_limit`.
     pub compilation_cache: PathBuf,
+    /// cargo's target directory. Like DerivedData it has no size limit: deleting it means a cold build.
+    pub target: PathBuf,
     /// Held with flock for the whole run; the kernel releases it when the last process holding it exits.
     pub lock: PathBuf,
     /// Who holds the lock, for the waiting message.
@@ -50,6 +52,7 @@ pub fn slot_paths(cache_dir: &Path, name: &str) -> SlotPaths {
         source: root.join("source"),
         derived_data: root.join("DerivedData"),
         compilation_cache: root.join("CompilationCache"),
+        target: root.join("target"),
         lock: root.join("lock"),
         owner: root.join("owner"),
         ignored_record: root.join("ignored_inputs"),
@@ -95,7 +98,7 @@ mod tests {
         let b = slot_paths(c, &slot_name(Some("u:a/two.git"), "/g"));
         assert_ne!(a.lock, b.lock);
         assert_eq!(a.lock, slot_paths(c, &slot_name(Some("u:a/one.git"), "/other")).lock);
-        assert!(a.source.starts_with(&a.root) && a.derived_data.starts_with(&a.root));
+        assert!(a.source.starts_with(&a.root) && a.derived_data.starts_with(&a.root) && a.target.starts_with(&a.root));
     }
 
     // A7.5

@@ -1,9 +1,10 @@
 //! Steps 1–4 of a run: parse the arguments, find the worktree and its slot, take the slot's lock,
 //! and sync the slot to the worktree. Step 5 and 6 (build, report) are in `build`.
-use crate::build;
+use crate::{build, cargo};
+use agent_build_core::args::Request;
 use agent_build_core::config::{self, Config};
 use agent_build_core::report::{self, Outcome};
-use agent_build_core::{args, project, slot};
+use agent_build_core::{args, cargo as cargo_args, project, slot};
 use agent_build_sys::lock::{LockError, SlotLock};
 use agent_build_sys::{git, ignored, signals, sync};
 use std::path::{Path, PathBuf};
@@ -11,7 +12,6 @@ use std::time::Instant;
 use std::{env, fs, io};
 
 pub struct Context {
-    pub inv: args::Invocation,
     pub worktree: PathBuf,
     /// The caller's directory relative to the worktree root, so xcodebuild runs in the same place in the slot.
     pub prefix: String,
@@ -25,7 +25,7 @@ pub struct Context {
 }
 
 pub fn run(argv: &[String]) -> Outcome {
-    let ctx = match prepare(argv) {
+    let (ctx, request) = match prepare(argv) {
         Ok(c) => c,
         Err(o) => return o,
     };
@@ -53,7 +53,11 @@ pub fn run(argv: &[String]) -> Outcome {
     if let Some(sig) = signals::pending() {
         return Outcome::Signaled(sig);
     }
-    build::run(&ctx, &lock, started.elapsed().as_secs_f64())
+    let sync_secs = started.elapsed().as_secs_f64();
+    match &request {
+        Request::Xcodebuild(inv) => build::run(&ctx, inv, &lock, sync_secs),
+        Request::Cargo(inv) => cargo::run(&ctx, inv, &lock, sync_secs),
+    }
 }
 
 fn usage(message: &str) -> Outcome {
@@ -61,9 +65,13 @@ fn usage(message: &str) -> Outcome {
     Outcome::Usage
 }
 
-fn prepare(argv: &[String]) -> Result<Context, Outcome> {
-    let mut inv = args::parse(argv).map_err(|e| usage(&e.message()))?;
-    for d in &inv.dropped {
+fn prepare(argv: &[String]) -> Result<(Context, Request), Outcome> {
+    let mut request = args::request(argv).map_err(|m| usage(&m))?;
+    let dropped = match &request {
+        Request::Xcodebuild(inv) => &inv.dropped,
+        Request::Cargo(inv) => &inv.dropped,
+    };
+    for d in dropped {
         eprintln!("{}", report::dropped_line(d));
     }
     let cwd = env::current_dir().map_err(|e| usage(&format!("cannot read the current directory: {e}")))?;
@@ -78,12 +86,17 @@ fn prepare(argv: &[String]) -> Result<Context, Outcome> {
     let slot_name = slot::slot_name(git::origin(&worktree).as_deref(), &common.to_string_lossy());
     let paths = slot::slot_paths(&dirs.cache, &slot_name);
     let output = project::output(&worktree);
-    for (flag, from, to) in args::relocate(&mut inv.args, |p| in_slot(p, &cwd, &worktree, &output.dir, &paths.source)) {
+    let to_slot = |p: &str| in_slot(p, &cwd, &worktree, &output.dir, &paths.source);
+    let moved = match &mut request {
+        Request::Xcodebuild(inv) => args::relocate(&mut inv.args, to_slot),
+        Request::Cargo(inv) => cargo_args::relocate(&mut inv.args, to_slot),
+    };
+    for (flag, from, to) in moved {
         if Path::new(&to).starts_with(&paths.source) {
             eprintln!("{}", report::relocated_line(&flag, &from, &to));
         }
     }
-    Ok(Context { inv, worktree, prefix, config, slot_name, paths, output, ignored_inputs })
+    Ok((Context { worktree, prefix, config, slot_name, paths, output, ignored_inputs }, request))
 }
 
 /// Where xcodebuild, running in the slot, finds `value`. A path inside the worktree, however it is

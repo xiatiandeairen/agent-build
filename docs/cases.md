@@ -29,13 +29,21 @@
 | A18 | 调用方是 `--depth 1` 浅克隆 → 建槽成功，同步后逐字节相同；调用方再 `git fetch --depth 1` 到更新的提交 → 再次同步成功；删掉调用方，同一 origin 的新浅克隆（更新的提交）→ 用同一个槽同步成功，退出码 0 | 67% 的 CI 检出是浅克隆；槽从调用方本地 fetch，浅仓库之间互相 fetch 可能缺对象或被拒；出错时持久 runner 上每次 CI 都以 125 失败，G4 落空 | 集成 | 已实现 |
 | A19 | 同一项目的两个 worktree A、B（假 xcodebuild 把是谁编的写进产物和日志）：A 编完 → 产物、结果包、日志都在 A 的 `.agent-build/output/`，输出行指向那里；B 再编 → 只有一个槽，A 的 output 里每个文件的内容和修改时间都不变；A 再编但失败 → A 的 output 里只有这次的结果包和日志，没有上次的产物；全程 B 的 output 不变 | 调用方装、测、导出用的是别的 worktree 的产物；output 里新旧两次的东西混在一起 | 集成 | 已实现 |
 | A20 | 编完后在 worktree 里 `git add -A` → 暂存的只有项目自己的 `.agent-build/config.yaml`，output 下的文件一个都没有；`output/.gitignore` 第一行写明由 agent-build 创建；下一次同步后槽的 `source/` 里有 config.yaml，没有 `.agent-build/output` | 产物被误提交；上一次的产物被当成源码改动同步进槽，每次多拷一份 | 集成 | 已实现 |
+| A21 | 样例 CargoSample（两个 crate、构建脚本、静态库、程序，零依赖）：`agb cargo build` → 退出码 0，产物在 worktree 的 `.agent-build/output/target/debug/`，worktree 里没有 `target/`；不改再编 → `units fresh=4 rebuilt=0`；`agb cargo run --bin sample-tool` → 程序输出原样显示；测试失败 → 退出码 101，输出 `agb: test failed: 名字: worktree 路径:行:列: 原因`；编译错误 → 101，错误按 `worktree 路径:行:列: error: 信息` 输出，rustc 的完整文字在 build.log | 参数拼错、target 没固定在槽里、路径没改写回 worktree、程序输出被吞 | 集成 | 已实现 |
+| A22 | 两个 worktree：X 在新提交（版本 v2），Y 在旧提交（v1）且源码修改时间早于任何一次编译；按 X、Y、X、Y 轮流 `agb cargo run` → 每次输出自己提交的版本 | Cargo 只看修改时间：共用 target 时旧 worktree 静默拿到别人的产物（实测 h2：1.3 秒、重编 0 个） | 集成 | 已实现 |
+| A23 | X 编过后，同一提交的 worktree Y 编 → `rebuilt=0`；Y 只改了 sample-ffi 的程序 → `agb: rebuilt: sample-ffi` | 同步碰了没变的文件，换 worktree 就全量重编（结果仍正确，最难发现） | 集成 | 已实现 |
+| A24 | 环境里 `RUSTC_WRAPPER` 指向一个一运行就失败的脚本 → 编译照常成功，输出 `agb: RUSTC_WRAPPER cleared` | kache 一类 wrapper 混进槽，带进它缓存 key 的漏洞 | 集成 | 已实现 |
+| A25 | 带 `--target-dir`、环境变量 `CARGO_TARGET_DIR`、指向 worktree 的 `--manifest-path` → 前者丢掉并提示、目录不被创建，后者改指向槽并提示；`fmt`、`add`、`update`、`clippy --fix`、`install` → 退出码 64；`clean` → 清空槽里的 target 目录 | 改的是槽里的文件、下次同步就被冲掉；编的是 worktree 而不是槽，同步白做 | 集成 | 已实现 |
+| A26 | build 后 output 的 `target/` 里只有 `debug/libsample_ffi.a` 和 `debug/sample-tool`；之后 `check`、`test` 不动它；编译失败 → 没有 `target/`，也不输出 `products=` | 拷了 GB 级中间产物；把旧产物当成这次的 | 集成 | 已实现 |
+| A27 | 同一仓库：假 xcodebuild 编译进行中时 `agb cargo build` → 输出在等它、它结束后才编；两者都成功，output 里 `Products/` 和 `target/` 并存 | 两个工具同时写一个槽，或互相删掉对方的产物 | 集成 | 已实现 |
+| A28 | rust-sdk 实测：两个 worktree 日常编译、A→B→A、出包脚本那条 4 目标平台的 cargo build 改走 agb；记录耗时；切回后的 `libcore_ffi.a` 与冷编逐字节一致。2026-11-22 实测（`cargo build -p core-ffi --lib`，同一槽，负载 load average 约 30～50，耗时只作参考）：dev 冷编 123.7 秒；不改再编 2.4 秒；同提交的另一个 worktree 7.8 秒、`rebuilt=0`；换到 Cargo.lock 不同的旧提交 B 42.8 秒、重编 17 个；切回 A 10.5 秒、重编 13 个，`libcore_ffi.a` 与冷编哈希相同；release 冷编 223.3 秒、B 119.3 秒、切回 A 重编 13 个且哈希与冷编相同、同提交另一个 worktree 4.4 秒。未做：4 个目标平台的出包那条 cargo build（要先让出包脚本从 `output/target/` 读产物，属接入方） | 样例工程证明不了真实项目上的收益和正确性 | 实测 | 待实现 |
 | A10 | 价值验证：在公开 app 上按下方"价值验证"表跑 V1–V7（同机、交替跑基准和 agb、各 3 次取中位数、开跑前负载低于 CPU 核数），每项达到它的通过线；切回已编过的提交时产物可复现部分与冷编逐字节一致 | 速度声明没有基准、判不了对错；单次测量在负载噪声下不可比 | 实测 | 待实现 |
 
 ## 内层细节
 
 | 编号 | 情形 → 预期 | 防什么错 | 验证 | 状态 |
 | --- | --- | --- | --- | --- |
-| A1.1 | 第一个词不是 `xcodebuild`（`xcrun xcodebuild`、绝对路径、`cargo`、`swift`）、带 `-exportArchive`、没有参数 → 退出码 64 并提示正确写法或用法 | 把别的命令当编译执行 | 单元 | 已实现 |
+| A1.1 | 第一个词既不是 `xcodebuild` 也不是 `cargo`（`xcrun xcodebuild`、绝对路径、`swift`）、带 `-exportArchive`、没有参数 → 退出码 64 并提示正确写法或用法 | 把别的命令当编译执行 | 单元 | 已实现 |
 | A1.2 | 带 `-derivedDataPath`、`-archivePath`、`-resultBundlePath` → 每个丢掉并各提示一行，其余参数顺序不变 | 丢参数时多吃或少吃一个值，参数错位 | 单元 | 已实现 |
 | A1.3 | 注入的参数恰好是缓存设置 + 槽里的 `-derivedDataPath`，加上 worktree 的 `.agent-build/output/` 里的 `-resultBundlePath`，archive 时再加那里的 `-archivePath`；不含其他编译设置 | 越界改设置；漏注入 `-derivedDataPath` 而写进 Xcode 默认目录 | 单元 | 已实现 |
 | A1.4 | 在不是 git 仓库的目录运行 → 退出码 64，说明需要 git 仓库 | 在任意目录乱建槽 | 集成 | 已实现 |
@@ -62,6 +70,10 @@
 | A16.1 | 配置 `cache_limit: 1M`：编完这个项目的缓存超过 1M → 删掉它，汇总行前输出一行说明；没超过 → 不动；另一个项目的缓存不受影响；大小按二进制单位（1G = 1024³ 字节）、按占用的磁盘块计 | 超限不清理、清错项目、单位算错 | 单元；集成 | 已实现 |
 | A11.1 | 项目文件解析：`ignored_inputs:` 下的 `- 路径`，引号和注释；绝对路径、`..`、仓库根目录、未知键、缩进不对 → 报错带行号 | 越出仓库的路径被同步，或写错被悄悄忽略 | 单元 | 已实现 |
 | A11.2 | 从编译输出里找出槽内路径：引号包围、`文件:行:列`、括号里、含空格；前缀相似的其他目录不算；同一路径只算一次 | 漏掉缺失的文件，或把别的路径当成槽内路径 | 单元 | 已实现 |
+| A25.1 | 解析 cargo 参数：跳过 `+工具链`、子命令前的选项和它们的值找到子命令，认得别名（`b`、`t`）；只放行编译类和 `clean`；`--target-dir`、`--message-format`（两种写法）连同值丢掉，`--` 之后不动；`--message-format=json` 插在子命令后；清空的 wrapper 变量恰好 4 个；`--manifest-path` 两种写法都能改指 | 丢参数时错位；把 `--` 后程序的参数当成 cargo 的；漏清某个 wrapper | 单元 | 已实现 |
+| A21.1 | 用录制的真 cargo JSON：错误、警告取主 span，相对路径按工作区根补成绝对路径，依赖的绝对路径不动；note 和 "for more information" 不算诊断；没有 span 的链接错误照样算错误；非 JSON 行不是消息；测试框架输出里取出失败的测试和 panic 位置 | 位置差一行、指到次要 span、漏报链接错误 | 单元 | 已实现 |
+| A21.2 | 按 Cargo 的 `fresh` 数复用和重编，本项目重编的包每个只记一次；汇总行字段 | 计数错、把依赖算成本项目 | 单元 | 已实现 |
+| A26.1 | 产物只取本项目包的 bin、staticlib、cdylib、dylib 的最终文件，不取 `.rlib`、`deps/`、构建脚本、测试框架、依赖 | 拷进中间产物或依赖 | 单元 | 已实现 |
 | A9.1 | 依赖检查：Cargo.toml 里只有 workspace 内部 crate，core 没有任何依赖；加第三方依赖或让 core 依赖 sys 时失败 | 有人加了第三方依赖，或 core 开始做 IO | 集成 | 已实现 |
 | A9.2 | 用例表核对：已实现的单元/集成用例必须有标了编号的测试，代码里的编号都在表里，tests/ 里的测试都有标注；任一不满足时失败 | 用例表和测试脱节 | 集成 | 已实现 |
 

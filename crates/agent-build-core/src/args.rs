@@ -1,4 +1,4 @@
-//! What the caller asked for: `agb xcodebuild <args...>`.
+//! What the caller asked for: `agb xcodebuild <args...>` (here) or `agb cargo <args...>` (`cargo`).
 //! Output locations belong to agb, so the flags that set them are dropped here,
 //! and the settings agb adds are listed in one place (`injected`).
 
@@ -33,7 +33,23 @@ pub enum ArgError {
     MissingValue(String),
 }
 
-pub const USAGE: &str = "usage: agb xcodebuild <xcodebuild arguments...>";
+pub const USAGE: &str =
+    "usage: agb xcodebuild <xcodebuild arguments...>\n       agb cargo <build|check|test|bench|run|doc|clippy|rustc|clean> [arguments...]";
+
+/// Which build tool the caller named, with its parsed arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Request {
+    Xcodebuild(Invocation),
+    Cargo(crate::cargo::Invocation),
+}
+
+/// `argv` is everything after the program name; the error is the message to print.
+pub fn request(argv: &[String]) -> Result<Request, String> {
+    match argv.split_first() {
+        Some((first, rest)) if first == "cargo" => crate::cargo::parse(rest).map(Request::Cargo).map_err(|e| e.message()),
+        _ => parse(argv).map(Request::Xcodebuild).map_err(|e| e.message()),
+    }
+}
 
 impl ArgError {
     pub fn message(&self) -> String {
@@ -42,7 +58,7 @@ impl ArgError {
             ArgError::NotXcodebuild(w) if w == "xcrun" || w.ends_with("/xcodebuild") => {
                 format!("write the command as `agb xcodebuild ...` (got `{w}`)")
             }
-            ArgError::NotXcodebuild(w) => format!("only xcodebuild is supported in this version (got `{w}`)\n{USAGE}"),
+            ArgError::NotXcodebuild(w) => format!("only xcodebuild and cargo are supported (got `{w}`)\n{USAGE}"),
             ArgError::Unsupported(f) => format!("{f} is not supported in this version: it does not build"),
             ArgError::MissingValue(f) => format!("{f} needs a value"),
         }
@@ -215,7 +231,10 @@ mod tests {
             assert_eq!(parse(&v(&[first, "build"])), Err(ArgError::NotXcodebuild(first.into())));
         }
         assert!(ArgError::NotXcodebuild("xcrun".into()).message().contains("agb xcodebuild"));
-        assert!(ArgError::NotXcodebuild("cargo".into()).message().contains("only xcodebuild"));
+        assert!(ArgError::NotXcodebuild("swift".into()).message().contains("only xcodebuild and cargo"));
+        assert!(matches!(request(&v(&["cargo", "build"])), Ok(Request::Cargo(_))));
+        assert!(matches!(request(&v(&["xcodebuild", "build"])), Ok(Request::Xcodebuild(_))));
+        assert!(request(&v(&["cargo", "fmt"])).is_err_and(|m| m.contains("agb only builds")));
         assert_eq!(parse(&v(&["xcodebuild", "-exportArchive", "-archivePath", "a"])), Err(ArgError::Unsupported("-exportArchive".into())));
         assert!(parse(&v(&["xcodebuild"])).is_ok(), "bare xcodebuild is passed through");
     }

@@ -2,8 +2,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
-Fast command-line Xcode builds for machines where many agents work in many worktrees, and for CI.
-Put `agb` in front of your `xcodebuild` command:
+Fast command-line Xcode and Cargo builds for machines where many agents work in many worktrees, and for CI.
+Put `agb` in front of your `xcodebuild` (or `cargo`, see [below](#rust-agb-cargo)) command:
 
 ```bash
 cd my-app            # any worktree of the project
@@ -62,6 +62,33 @@ Two builds of the same project take turns: the second prints whom it is waiting 
 incrementally in the warm slot. Different projects never wait for each other. How many builds run at
 once on the machine is left to your queue (for example [agent-quay](https://github.com/xiatiandeairen/agent-quay)).
 CI uses the same command; configure runners not to run two jobs of the same project at once.
+
+## Rust: `agb cargo`
+
+The same slot, sync, lock and output serve Cargo projects. Put `agb` in front of `cargo`:
+
+```bash
+agb cargo build --release -p core-ffi --target aarch64-apple-ios
+agb cargo test
+```
+
+- Cargo runs in the slot with the slot's `target/`, so Cargo's own incremental build carries over
+  from one worktree to the next. Only `build`, `check`, `test`, `bench`, `run`, `doc`, `clippy`,
+  `rustc` and `clean` are accepted; commands that change files (`fmt`, `fix`, `add`, `update`),
+  install, publish or only query are refused with exit code 64: run cargo directly for those.
+- `--target-dir`, `--message-format` and `CARGO_TARGET_DIR` are owned by agb and dropped with a notice.
+- rustc runs without a wrapper (kache, sccache): the rustc wrapper variables are set empty, which
+  also overrides `build.rustc-wrapper` in Cargo's config. A wrapper's cache key can miss inputs that
+  change the result; reuse is decided by Cargo alone.
+- After `build` or `rustc`, the products of the packages you asked for (`.a`, `.dylib`, programs)
+  are copied to `.agent-build/output/target/`, at the same paths as in a target directory, e.g.
+  `.agent-build/output/target/aarch64-apple-ios/release/libcore_ffi.a`. Packaging steps after cargo
+  (bindings, `lipo`, xcframeworks) read them there.
+- The report: errors as `path:line:column: error: message` (rustc's full text is in the log), failed
+  tests, `agb: rebuilt: <your packages that were rebuilt>`, and a summary with Cargo's own
+  `units fresh=… rebuilt=…`.
+- Preconditions beyond P3, P5 and P8: the build depends only on the sources, `Cargo.lock`, the
+  toolchain and the inputs build scripts declare (`rerun-if-changed`, `rerun-if-env-changed`).
 
 ## Preconditions
 

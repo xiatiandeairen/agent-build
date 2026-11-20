@@ -25,8 +25,10 @@ pub const OUTPUT_GITIGNORE: &str = "# Automatically created by agent-build.\n*\n
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Output {
     pub dir: PathBuf,
-    /// A copy of the slot's products as this run left them.
+    /// A copy of the slot's products as this run left them (xcodebuild).
     pub products: PathBuf,
+    /// cargo's products, at the same paths as in its target directory.
+    pub target: PathBuf,
     /// Where the copy is made before it becomes `products`, so a cut-off copy is never mistaken for one.
     pub staging: PathBuf,
     pub result_bundle: PathBuf,
@@ -38,6 +40,7 @@ pub fn output(worktree: &Path) -> Output {
     let dir = worktree.join(OUTPUT);
     Output {
         products: dir.join("Products"),
+        target: dir.join("target"),
         staging: dir.join(".staging"),
         result_bundle: dir.join("result.xcresult"),
         log: dir.join("build.log"),
@@ -134,7 +137,9 @@ mod tests {
     fn the_output_lives_in_the_worktree_and_ignores_itself() {
         let out = output(Path::new("/w"));
         assert_eq!(out.dir, PathBuf::from("/w/.agent-build/output"));
-        assert!([&out.products, &out.staging, &out.result_bundle, &out.log].iter().all(|p| p.parent() == Some(out.dir.as_path())));
+        assert!(
+            [&out.products, &out.target, &out.staging, &out.result_bundle, &out.log].iter().all(|p| p.parent() == Some(out.dir.as_path()))
+        );
         assert_eq!(OUTPUT_GITIGNORE.lines().last(), Some("*"));
         assert!(Path::new(FILE).starts_with(".agent-build"));
     }

@@ -1,7 +1,8 @@
-//! `agb xcodebuild <args...>`: run xcodebuild for any worktree in its project's fixed build
-//! slot, so Xcode's incremental build and compilation cache carry over between worktrees.
+//! `agb xcodebuild <args...>` and `agb cargo <args...>`: run the build tool for any worktree in its
+//! project's fixed build slot, so incremental builds carry over between worktrees.
 mod app;
 mod build;
+mod cargo;
 
 use agent_build_core::report;
 use std::process::ExitCode;

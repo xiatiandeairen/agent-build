@@ -1,0 +1,18 @@
+
+running 1 test
+test tests::version_is_set ... FAILED
+
+failures:
+
+---- tests::version_is_set stdout ----
+
+thread 'tests::version_is_set' (15455698) panicked at core/src/lib.rs:11:9:
+SAMPLE_FAIL is set
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    tests::version_is_set
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

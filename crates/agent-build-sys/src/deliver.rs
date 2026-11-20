@@ -46,6 +46,28 @@ pub fn publish(products: &Path, out: &Output) -> io::Result<bool> {
     Ok(true)
 }
 
+/// After a successful cargo build: `out.target` becomes a copy of `files` (relative to the slot's
+/// `target_dir`, at the same relative paths), made and swapped in the same way as `publish`;
+/// `false` when the build made no products.
+pub fn publish_files(target_dir: &Path, files: &[String], out: &Output) -> io::Result<bool> {
+    if files.is_empty() {
+        return Ok(false);
+    }
+    remove(&out.staging)?;
+    for rel in files {
+        let to = out.staging.join(rel);
+        fs::create_dir_all(to.parent().unwrap_or(&out.staging))?;
+        let from = target_dir.join(rel);
+        if !copy(&["-c"], &from, &to)? && !copy(&[], &from, &to)? {
+            remove(&out.staging)?;
+            return Err(io::Error::other(format!("cp could not copy {}", from.display())));
+        }
+    }
+    remove(&out.target)?;
+    fs::rename(&out.staging, &out.target)?;
+    Ok(true)
+}
+
 /// `cp` keeps symbolic links inside app bundles as links and, with `-c`, clones instead of copying.
 fn copy(flags: &[&str], from: &Path, to: &Path) -> io::Result<bool> {
     Ok(Command::new("cp").args(flags).arg(from).arg(to).output()?.status.success())

@@ -20,20 +20,20 @@ use std::time::Instant;
 /// Lines of raw output shown when a failed build left no result bundle to read.
 const TAIL: usize = 30;
 
-pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
+pub fn run(ctx: &Context, inv: &args::Invocation, lock: &SlotLock, sync_secs: f64) -> Outcome {
     let out = &ctx.output;
-    let archive = out.dir.join(args::archive_name(ctx.inv.scheme.as_deref()));
-    let quiet = ctx.inv.action != Action::Info;
+    let archive = out.dir.join(args::archive_name(inv.scheme.as_deref()));
+    let quiet = inv.action != Action::Info;
     // An information command makes no outputs, so it leaves the last build's untouched.
-    let readied = if quiet { deliver::prepare(out, &replaced(ctx)) } else { Ok(()) };
+    let readied = if quiet { deliver::prepare(out, &replaced(ctx, inv)) } else { Ok(()) };
     if let Err(e) = readied {
         eprintln!("agb: cannot ready the output directory {}: {e}", out.dir.display());
         return Outcome::SyncFailed;
     }
     let (dd, archive_s, bundle_s) = (text(&ctx.paths.derived_data), text(&archive), text(&out.result_bundle));
     let outputs = Outputs { derived_data: &dd, archive: &archive_s, result_bundle: &bundle_s };
-    let mut argv = args::injected(ctx.inv.action, &outputs, &text(&ctx.paths.compilation_cache), &ctx.config.cache_limit);
-    argv.extend(ctx.inv.args.iter().cloned());
+    let mut argv = args::injected(inv.action, &outputs, &text(&ctx.paths.compilation_cache), &ctx.config.cache_limit);
+    argv.extend(inv.args.iter().cloned());
     let program = std::env::var("AGENT_BUILD_XCODEBUILD").unwrap_or_else(|_| "xcodebuild".to_string());
     let log_path = quiet.then(|| out.log.clone());
     let log_shown = log_path.as_deref().map(text).unwrap_or_else(|| "(not written)".to_string());
@@ -47,7 +47,7 @@ pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
     let (slot_src, worktree) = (text(&ctx.paths.source), text(&ctx.worktree));
     let started = Instant::now();
     let mut tail: VecDeque<String> = VecDeque::with_capacity(TAIL + 1);
-    let ended = run::run(&program, &argv, &ctx.paths.source.join(&ctx.prefix), lock, |stream, line| {
+    let ended = run::run(&program, &argv, &[], &ctx.paths.source.join(&ctx.prefix), lock, |stream, line| {
         if let Some(f) = log_file.as_mut() {
             let _ = writeln!(f, "{line}"); // best effort
         }
@@ -75,7 +75,7 @@ pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
         }
     };
     let ok = outcome == Outcome::Built(0);
-    finish(ctx, &Run { tail: &tail, archive: &archive, ok, sync_secs, build_secs, log: &log_shown });
+    finish(ctx, inv, &Run { tail: &tail, archive: &archive, ok, sync_secs, build_secs, log: &log_shown });
     outcome
 }
 
@@ -114,11 +114,11 @@ fn read_results(bundle: &Path, action: Action) -> Results {
 
 /// Report lines, in order: errors, failed tests (or the end of the raw output when a failed
 /// build left nothing to read), phases, P4, top misses, P5, P8, output locations, summary.
-fn finish(ctx: &Context, run: &Run) {
+fn finish(ctx: &Context, inv: &args::Invocation, run: &Run) {
     let (src, wt) = (text(&ctx.paths.source), text(&ctx.worktree));
     let show = |s: &str| output::to_caller(s, &src, &wt).into_owned();
     let bundle = &ctx.output.result_bundle;
-    let r = read_results(bundle, ctx.inv.action);
+    let r = read_results(bundle, inv.action);
     // An error in a build that succeeded did not fail it (a build script printed `error:` and
     // exited 0): shown apart and not counted, so the error count agrees with the exit code.
     let recorded = r.issues.iter().filter(|i| i.severity == Severity::Error);
@@ -145,9 +145,9 @@ fn finish(ctx: &Context, run: &Run) {
         report::p8_line(&missing_ignored(ctx, run, &errors)),
     ];
     lines.into_iter().flatten().for_each(|l| eprintln!("{l}"));
-    let products = if run.ok { publish_products(ctx) } else { None };
+    let products = if run.ok { publish_products(ctx, inv) } else { None };
     let bundle = bundle.exists().then(|| text(bundle));
-    for line in report::output_lines(ctx.inv.action, run.ok, products.as_deref(), &text(run.archive), bundle.as_deref()) {
+    for line in report::output_lines(inv.action, run.ok, products.as_deref(), &text(run.archive), bundle.as_deref()) {
         eprintln!("{line}");
     }
     if let Some(line) = clear_cache_over_limit(ctx) {
@@ -197,12 +197,12 @@ fn missing_ignored(ctx: &Context, run: &Run, errors: &[&xcresult::Issue]) -> Vec
 /// The outputs this run makes anew, removed before it starts so the output directory never mixes
 /// two runs' outputs of one kind: always the result bundle (xcodebuild refuses an existing one) and
 /// the log; the products when it builds them; every archive when it archives.
-fn replaced(ctx: &Context) -> Vec<PathBuf> {
+fn replaced(ctx: &Context, inv: &args::Invocation) -> Vec<PathBuf> {
     let out = &ctx.output;
     let mut v = vec![out.result_bundle.clone(), out.log.clone()];
-    if ctx.inv.action == Action::Archive {
+    if inv.action == Action::Archive {
         v.extend(deliver::archives(out));
-    } else if ctx.inv.builds {
+    } else if inv.builds {
         v.push(out.products.clone());
     }
     v
@@ -210,8 +210,8 @@ fn replaced(ctx: &Context) -> Vec<PathBuf> {
 
 /// The worktree's copy of the slot's products, made under the slot lock so no other build changes
 /// them halfway; `None` when this run built none or the copy failed (said in a line).
-fn publish_products(ctx: &Context) -> Option<String> {
-    if !ctx.inv.builds || ctx.inv.action == Action::Archive {
+fn publish_products(ctx: &Context, inv: &args::Invocation) -> Option<String> {
+    if !inv.builds || inv.action == Action::Archive {
         return None;
     }
     match deliver::publish(&ctx.paths.derived_data.join("Build").join("Products"), &ctx.output) {
@@ -224,6 +224,6 @@ fn publish_products(ctx: &Context) -> Option<String> {
     }
 }
 
-fn text(p: &Path) -> String {
+pub fn text(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }

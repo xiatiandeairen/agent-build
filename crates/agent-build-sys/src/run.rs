@@ -1,4 +1,4 @@
-//! Run xcodebuild in its own process group, stream its output line by line, and on Ctrl-C or
+//! Run the build tool in its own process group, stream its output line by line, and on Ctrl-C or
 //! termination stop the whole group before returning.
 use crate::lock::SlotLock;
 use crate::{ffi, signals};
@@ -38,10 +38,19 @@ fn pump(reader: impl Read + Send + 'static, stream: Stream, tx: mpsc::Sender<(St
 }
 
 /// The slot lock is handed down so it stays held while xcodebuild or anything it started runs.
-pub fn run(program: &str, args: &[String], cwd: &Path, lock: &SlotLock, mut on_line: impl FnMut(Stream, &str)) -> io::Result<Ended> {
+/// `env` is added to (and overrides) agb's own environment.
+pub fn run(
+    program: &str,
+    args: &[String],
+    env: &[(String, String)],
+    cwd: &Path,
+    lock: &SlotLock,
+    mut on_line: impl FnMut(Stream, &str),
+) -> io::Result<Ended> {
     lock.hand_down()?;
     let mut child = Command::new(program)
         .args(args)
+        .envs(env.iter().map(|(k, v)| (k, v)))
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

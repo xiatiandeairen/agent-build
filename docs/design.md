@@ -1,7 +1,7 @@
-# agent-build 方案（iOS/macOS 极速编译）
+# agent-build 方案（iOS/macOS 与 Rust 极速编译）
 
 
-**状态：** 已实现（Rust，本仓库）。验收用例与每条的状态见 [cases.md](cases.md)；除 A10（my-app 实测，等接入方在 `.agent-build/config.yaml` 里声明 rust-core 产物）外全部通过。
+**状态：** 已实现（Rust，本仓库）。验收用例与每条的状态见 [cases.md](cases.md)；除 A10（my-app 实测，等接入方在 `.agent-build/config.yaml` 里声明 rust-core 产物）和 A28（rust-sdk 实测）外全部通过。cargo 的部分见 [Cargo（agb cargo）](#cargoagb-cargo)。
 
 **一句话方案：** 每个项目在本机有一个固定路径的构建槽（git 克隆 + 常驻 DerivedData），agent 从任何 worktree 编译时，agent-build 把代码同步进这个槽再调用 xcodebuild；路径固定让 Xcode 的增量编译跨 worktree 继续有效，每个槽带一份自己的编译缓存，来回切换分支时编过的部分直接命中。
 
@@ -28,7 +28,8 @@
 
 | 做 | 不做，以及原因 |
 | --- | --- |
-| iOS/macOS 的 Swift 工程，混编的 ObjC/C 照常参与复用 | Android、Electron、Rust：长期方向，另起卡片 |
+| iOS/macOS 的 Swift 工程，混编的 ObjC/C 照常参与复用 | Android、Electron：长期方向，另起卡片 |
+| Rust 工程的 cargo 编译（`agb cargo`，见 [Cargo](#cargoagb-cargo) 一节） | cargo 之外的出包步骤（绑定生成、lipo、打 xcframework）：接入方拿 output 里的产物自己做（D4） |
 | 本机 agent 的命令行编译，以及 CI | Xcode IDE 里的开发体验 |
 | 前提满足与否的说明（G6） | 替项目修前提（依赖二进制化、修 pre-action、关 dSYM、约束检查）：接入方自己的事 |
 | 单机内共享复用 | 远程共享缓存；排队和资源管控（交给 aq）；定期全量对照这类事后兜底（不符合 G5）；CI 如何安装 agent-build（落地阶段再定） |
@@ -94,7 +95,7 @@ G8 代码质量是贯穿的约束，不参与排序。
 | D2 | 排队与资源管控 | 交给 aq；agent-build 只用槽锁保证同一槽不被同时写 | 复用现有机制，不另造一套 |
 | D3 | 产物 | 交给调用方的东西（产物、结果包、归档、日志）放在调用方 worktree 的 `.agent-build/output/`，只被这个 worktree 下次产出同类东西的运行替换；产物在槽锁内用 APFS 克隆从槽里复制过去 | 槽是同项目所有 worktree 共用的，留在槽里会被别的 worktree 的编译改写：build-for-testing 和 test-without-building 之间、编完到装上模拟器之间都会拿错二进制。克隆 Swiftfin 1.1G 产物 0.43 秒（实测）。比过：每个 worktree 一个槽（丢掉共享的增量编译）、按 worktree 改编译设置的输出目录（换 worktree 就要重新链接）、编完继续持锁到调用方用完（别人都得等）、放在 XDG 缓存里（要另做回收；放进 worktree 随 worktree 删） |
 | D4 | 编译前步骤 | 不提供；编译需要的东西归工程自己准备（前提 P8） | 职责边界：工程怎么准备是接入方的事 |
-| D5 | 命令形态 | 在原命令前加 `agb`（agent-build 的命令名；不用 `ab`，因为 macOS 自带 `/usr/sbin/ab`）：`agb xcodebuild …`；本期只接受 xcodebuild | 给以后的 `agb cargo …` 留位置，agent 只需加一个词 |
+| D5 | 命令形态 | 在原命令前加 `agb`（agent-build 的命令名；不用 `ab`，因为 macOS 自带 `/usr/sbin/ab`）：`agb xcodebuild …`、`agb cargo …`；只接受这两个，cargo 只接受编译类子命令和 `clean` | agent 只需加一个词；agb 只管编译，改源码、发布、查询的命令直接用原工具 |
 | D6 | 项目名与位置 | agent-build，`~/Workspace/self/agent-build` | 直白，和 agent-verify 同一风格，不绑定语言 |
 | D7 | 技术选型 | Rust，照搬 agent-quay 的工程骨架（core / sys / 二进制三层、clippy deny、just check），零第三方依赖 | 以后扩到 Rust 和 Linux CI；复用你现有的骨架 |
 | D8 | 配置 | 全局只有 `cache_limit` 一项（XDG、YAML 平铺键值），不理解项目 | G7；配置不理解项目概念 |
@@ -108,7 +109,10 @@ G8 代码质量是贯穿的约束，不参与排序。
 
 ```
 agb xcodebuild <xcodebuild 参数...>
+agb cargo <build|check|test|bench|run|doc|clippy|rustc|clean> [参数...]
 ```
+
+cargo 的规则见 [Cargo](#cargoagb-cargo) 一节；下面说的是 xcodebuild。
 
 | 用法 | 例子 |
 | --- | --- |
@@ -157,8 +161,9 @@ $XDG_CACHE_HOME/agent-build/               全部可删，删了只会变慢
         ├── owner                          最近的持有者（pid、worktree），等待者据此输出在等谁；每次加锁时覆盖
         ├── ignored_inputs                 上次同步的被忽略路径列表，用来删掉不再声明的路径
         ├── source/                        git 克隆：槽里的代码；建到一半中断的，下次运行开头删掉重建
-        ├── DerivedData/                   xcodebuild 靠它增量编译，含 SourcePackages；由 Xcode 自己管理
-        └── CompilationCache/              这个项目的编译缓存；编完超过 cache_limit 就整个删掉
+        ├── DerivedData/                   xcodebuild 靠它增量编译，含 SourcePackages；由 Xcode 自己管理；用 xcodebuild 编过才有
+        ├── CompilationCache/              这个项目的编译缓存；编完超过 cache_limit 就整个删掉；用 xcodebuild 编过才有
+        └── target/                        cargo 的 target 目录，靠它增量编译；不设上限（同 DerivedData）；用 cargo 编过才有
 <worktree>/.agent-build/
 ├── config.yaml                            项目文件，可以没有；由项目提交
 └── output/                                交给调用方的东西；随 worktree 删
@@ -166,7 +171,8 @@ $XDG_CACHE_HOME/agent-build/               全部可删，删了只会变慢
     ├── Products/                          产物：编出产物的运行在槽锁内从槽里克隆过来；被这个 worktree 下次编出产物的运行替换
     ├── result.xcresult                    结果包：每次运行（信息命令除外）开头删掉，xcodebuild 直接写到这里
     ├── <scheme>.xcarchive                 归档：archive 运行开头删掉所有旧的，xcodebuild 直接写到这里
-    ├── build.log                          xcodebuild 的完整输出：每次运行（信息命令除外）重写
+    ├── target/                            cargo 的产物（本次要求的包的 .a、.dylib、可执行文件），路径与 target 目录里相同；被这个 worktree 下次 build、rustc 替换
+    ├── build.log                          xcodebuild 或 cargo 的完整输出：每次运行（信息命令除外）重写
     └── .staging/                          中间：克隆产物时先放这里，成功后改名为 Products/；中断留下的，下次运行开头删掉
 ```
 
@@ -260,6 +266,39 @@ agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 erro
 - 没有 `config.yaml` 时：`cache_limit` = 20G，每个项目。
 - 20G 的来源：Swiftfin 冷编一次缓存约 3.1G（实测），20G 约能装下 6 个分支的编译结果；是假设，按价值验证和实际使用的数据再调。
 - 全局配置不按项目区分；项目只能在自己仓库的 `.agent-build/config.yaml` 里声明被忽略的编译输入（D9），编译前需要准备的东西仍归工程自己（D4）。
+
+## Cargo（agb cargo）
+
+和 xcodebuild 用同一套机制：同一个槽、同步、槽锁、`.agent-build/config.yaml`、worktree 的 output、输出路径改写。只说不同的地方。
+
+**做法**：在槽里运行 cargo，`CARGO_TARGET_DIR` 固定为槽里的 `target/`，加 `--message-format=json` 读 Cargo 的结构化消息；清空 rustc wrapper；编完把本次产物拷进 worktree 的 `output/target/`。同一项目既用 xcodebuild 又用 cargo 时共用一个槽和一把锁，构建目录和产物各放各的。
+
+| 子命令 | 处理 |
+| --- | --- |
+| `build`、`rustc` | 编译；成功时把本次要求的包的 `.a`、`.dylib`、可执行文件拷到 `output/target/`（路径同 target 目录），先删旧的；失败不给产物 |
+| `run`、`bench` | 编译并运行；程序自己的输出原样显示 |
+| `test` | 编译并测试；失败的测试按 `agb: test failed: 名字: 路径:行:列: 原因` 列出 |
+| `check`、`clippy`、`doc` | 只看诊断；不动 output 里的产物 |
+| `clean` | 清空槽里的 target 目录，cargo 的输出原样显示 |
+| 其他（`fmt`、`fix`、`clippy --fix`、`add`、`update`、`install`、`publish`、`metadata`、`tree` 等） | 退出码 64，提示直接用 cargo：改的是槽里的文件，下次同步就被冲掉；或写到槽外、或不编译 |
+
+- 参数：`--target-dir`、`--message-format` 和环境变量 `CARGO_TARGET_DIR` 由 agb 接管，传了丢掉并提示；`--manifest-path` 指向 worktree 时改指向槽里的同一份；`--` 之后原样交给程序或测试框架。
+- 退出码：cargo 自己的（编译失败 101）；64、125、128 + 信号号同 xcodebuild。
+
+**正确性（G5）**：Cargo 按源码文件的修改时间判断要不要重编，不看内容。两个 worktree 共用一个 target 目录时，旧提交的 worktree 文件更旧，Cargo 会直接用别的 worktree 编出的产物（实测 h2：1.3 秒、重编 0 个单元）。槽里只有一份源码，同步只重写内容变了的文件，重写的文件修改时间是新的，所以修改时间可信；A22 用旧提交、旧修改时间的 worktree 守住这一点。在同一个槽里 A→B→A 切换，切回后的 `libcore_ffi.a` 与冷编逐字节一致（rust-sdk，dev 与 release 各一组，实测）。
+
+**不接 rustc wrapper（kache、sccache）**：wrapper 按自己的 key 复用产物，key 漏掉影响结果的输入就会编错：kache 的 rustc key 不含 `IPHONEOS_DEPLOYMENT_TARGET`，改了部署目标后产物里仍有 6 个 crate 是旧的 `minos 13.0`（2026-11-12 实测）。按优先级 1，复用只由 Cargo 自己判断：agb 把 `RUSTC_WRAPPER`、`CARGO_BUILD_RUSTC_WRAPPER`、`RUSTC_WORKSPACE_WRAPPER`、`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` 设为空（空值也盖过 Cargo 配置文件里的 `build.rustc-wrapper`），环境里设过的在输出里点名一行。代价：切回编过的提交时，内容变过的工作区 crate 要重编（rust-sdk 13 个，dev 约 8 秒，release 每个目标平台约 80 秒；有 kache 时约 1 秒，实测）。C 编译器那层（PATH 上的 `cc` 包装、Cargo 配置 `[env]` 里的 `HOST_CC`）属于环境，agb 不改。
+
+**前提**（在 P3、P5、P8 之外）：
+
+| # | 前提 | 不满足时 |
+| --- | --- | --- |
+| R1 | 编译结果只取决于源码、`Cargo.lock`、工具链和构建脚本声明过的输入（`rerun-if-changed`、`rerun-if-env-changed`）；本机和 CI 的环境变量不同由接入方负责 | 声明过的变了：Cargo 重跑，正确但慢；没声明的影响了产物：不保证，agb 不检测（同 P6） |
+| R2 | 多步出包（生成绑定、lipo、打包）读 `output/target/` 里的产物，不读槽 | 读到别的 worktree 后来编的东西 |
+
+**输出**（终端，编完）：错误按 `worktree 路径:行:列: error: 信息`（rustc 的完整文字在 `build.log`）、失败的测试、`agb: rebuilt: <重编的本项目包>`、P5、P8、`products=`、汇总行 `agb: ok slot=… sync=… build=… units fresh=N rebuilt=M errors=… warnings=… log=…`。`fresh`、`rebuilt` 来自 Cargo 消息里每个单元的 `fresh` 字段。构建脚本的运行次数不显示：Cargo 对没重跑的构建脚本也发 `build-script-executed`，数不出重跑了几个（实测：空编译仍有 26 条）。
+
+**比过的候选**：让 kache 留在槽里（切回快，但继承它的 key 漏洞，违反 G5）；Rust 1.99 的共享 build-dir（跨 worktree 用错产物，见上）；`agb run` 在槽里跑整个出包脚本（越过"只管编译"，D4）；把整个 target 目录拷给调用方（GB 级中间产物）。
 
 ## 多项目与多 worktree（G3）
 
