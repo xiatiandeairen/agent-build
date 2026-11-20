@@ -33,6 +33,8 @@ pub struct SlotPaths {
     /// The slot's DerivedData.
     pub derived_data: PathBuf,
     pub archives: PathBuf,
+    /// The project's own compilation cache; cleared after a build that left it over `cache_limit`.
+    pub cas: PathBuf,
     /// The last run's result bundle; replaced by each run.
     pub result_bundle: PathBuf,
     /// Held with flock for the whole run; the kernel releases it when the last process holding it exits.
@@ -49,6 +51,7 @@ pub fn slot_paths(cache_dir: &Path, name: &str) -> SlotPaths {
         src: root.join("src"),
         derived_data: root.join("dd"),
         archives: root.join("archives"),
+        cas: root.join("cas"),
         result_bundle: root.join("result.xcresult"),
         lock: root.join("lock"),
         owner: root.join("owner"),
@@ -66,11 +69,6 @@ pub fn as_xcode_prints(path: &Path) -> PathBuf {
         Some(rest) => PathBuf::from(rest),
         None => path.to_path_buf(),
     }
-}
-
-/// The shared compilation cache directory.
-pub fn cas_path(cache_dir: &Path) -> PathBuf {
-    cache_dir.join("cas")
 }
 
 #[cfg(test)]

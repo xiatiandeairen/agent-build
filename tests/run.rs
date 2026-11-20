@@ -154,14 +154,16 @@ fn the_cache_limit_comes_from_the_config_and_a_bad_config_is_refused() {
     let a = repo(&w.path("app"));
     let (r, seen) = args_seen(&w, &a);
     assert_eq!(r.code(), 0, "{}", r.all());
-    assert!(seen.contains(&"COMPILATION_CACHE_LIMIT_SIZE=40G".to_string()), "{seen:?}");
+    assert!(seen.contains(&"COMPILATION_CACHE_LIMIT_SIZE=20G".to_string()), "{seen:?}");
+    let cas = seen.iter().find_map(|a| a.strip_prefix("COMPILATION_CACHE_CAS_PATH=")).unwrap_or_default();
+    assert!(cas.contains("/xdg-cache/agent-build/slots/") && cas.ends_with("/cas"), "the cache is not the project's own: {seen:?}");
     let dd = seen.iter().position(|a| a == "-derivedDataPath").and_then(|i| seen.get(i + 1)).cloned().unwrap_or_default();
     assert!(dd.contains("/xdg-cache/agent-build/slots/") && dd.ends_with("/dd"), "{seen:?}");
     assert_eq!(&seen[seen.len() - 3..], ["build", "-scheme", "App"], "the caller's arguments come last, unchanged");
 
-    write(&w.config_file(), "# smaller cache\ncache_limit: 20G\n");
+    write(&w.config_file(), "# smaller cache\ncache_limit: 10G\n");
     let (_, seen) = args_seen(&w, &a);
-    assert!(seen.contains(&"COMPILATION_CACHE_LIMIT_SIZE=20G".to_string()), "{seen:?}");
+    assert!(seen.contains(&"COMPILATION_CACHE_LIMIT_SIZE=10G".to_string()), "{seen:?}");
 
     write(&w.config_file(), "cache_limit: 20G\nslots: 3\n");
     let (r, seen) = args_seen(&w, &a);
@@ -185,5 +187,35 @@ fn an_absolute_worktree_path_to_the_project_is_built_from_the_slot() -> TestResu
     let value = seen.lines().skip_while(|l| *l != "-workspace").nth(1).unwrap_or_default().to_string();
     assert!(value.contains("/slots/") && value.ends_with("/src/App.xcworkspace"), "xcodebuild got {value}");
     assert!(r.stderr().contains(&format!("agb: -workspace {given} is in the worktree; building the slot's copy")), "{}", r.all());
+    Ok(())
+}
+
+// A16.1
+#[test]
+fn a_project_cache_over_the_limit_is_cleared_after_the_build_without_touching_other_projects() -> TestResult {
+    let w = World::new("cachelimit");
+    let (a, b) = (repo(&w.path("a")), repo(&w.path("b")));
+    write(&w.config_file(), "cache_limit: 1M\n");
+    let fill = |bytes: &str| [("FAKE_CAS_BYTES", bytes.to_string())];
+    let cas_of = |r: &Run| -> std::path::PathBuf {
+        let log = r.stderr().lines().last().and_then(|l| l.split("log=").nth(1)).map(String::from).unwrap_or_default();
+        let raw = fs::read_to_string(&log).unwrap_or_default();
+        let arg = raw.split_whitespace().find_map(|t| t.strip_prefix("COMPILATION_CACHE_CAS_PATH=").map(String::from)).unwrap_or_default();
+        std::path::PathBuf::from(arg)
+    };
+
+    let small_b = w.build(&b, &fill("100000"));
+    assert_eq!(small_b.code(), 0, "{}", small_b.all());
+    assert!(!small_b.stderr().contains("cache_limit"), "{}", small_b.all());
+    let cas_b = cas_of(&small_b);
+    assert!(cas_b.is_dir(), "a cache under the limit was removed: {}", cas_b.display());
+
+    let big_a = w.build(&a, &fill("3000000"));
+    assert_eq!(big_a.code(), 0, "{}", big_a.all());
+    assert!(big_a.stderr().contains("exceeded cache_limit 1M and was cleared"), "{}", big_a.all());
+    let summary = big_a.stderr().lines().last().unwrap_or_default().to_string();
+    assert!(summary.starts_with("agb: ok "), "the cache line comes before the summary: {}", big_a.all());
+    assert!(!cas_of(&big_a).exists(), "the cache over the limit is still there");
+    assert!(cas_b.is_dir(), "another project's cache was removed");
     Ok(())
 }

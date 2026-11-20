@@ -125,6 +125,16 @@ pub fn dropped_line(flag_and_value: &str) -> String {
     format!("{PREFIX} ignored {flag_and_value}: output locations are managed by agb")
 }
 
+/// After a build that left the project's cache over the limit: it was cleared, or could not be.
+pub fn cache_cleared_line(used_bytes: u64, limit: &str, cleared: bool) -> String {
+    let used = format!("{:.1}G", used_bytes as f64 / f64::from(1u32 << 30));
+    if cleared {
+        format!("{PREFIX} cache {used} exceeded cache_limit {limit} and was cleared; the next build refills it")
+    } else {
+        format!("{PREFIX} cache {used} exceeds cache_limit {limit}, but clearing it failed; delete it by hand")
+    }
+}
+
 pub fn relocated_line(flag: &str, from: &str, to: &str) -> String {
     format!("{PREFIX} {flag} {from} is in the worktree; building the slot's copy {to}")
 }

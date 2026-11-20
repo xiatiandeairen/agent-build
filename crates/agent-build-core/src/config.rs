@@ -5,13 +5,14 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    /// Size limit of the shared compilation cache, passed to Xcode as is (e.g. `40G`).
+    /// Size limit of each project's compilation cache (e.g. `20G`, binary units). Xcode is told
+    /// too, but does not enforce it, so agb clears a cache that a build left over the limit.
     pub cache_limit: String,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config { cache_limit: "40G".to_string() }
+        Config { cache_limit: "20G".to_string() }
     }
 }
 
@@ -70,6 +71,18 @@ pub(crate) fn unquote(v: &str) -> &str {
         }
     }
     v
+}
+
+/// `20G` → bytes, in binary units (K = 1024), as `du -h` counts.
+pub fn size_bytes(v: &str) -> Option<u64> {
+    let (digits, shift) = match v.as_bytes().last()? {
+        b'K' => (&v[..v.len() - 1], 10),
+        b'M' => (&v[..v.len() - 1], 20),
+        b'G' => (&v[..v.len() - 1], 30),
+        b'T' => (&v[..v.len() - 1], 40),
+        _ => (v, 0),
+    };
+    digits.parse::<u64>().ok()?.checked_mul(1 << shift)
 }
 
 fn is_size(v: &str) -> bool {
@@ -134,5 +147,17 @@ mod tests {
         assert_eq!(d.config, PathBuf::from("/x/agent-build"));
         assert_eq!(d.cache, PathBuf::from("/h/.cache/agent-build"));
         assert!(dirs(env(&[])).is_none());
+    }
+
+    // A16.1
+    #[test]
+    fn sizes_are_binary_units() {
+        assert_eq!(size_bytes("20G"), Some(20 << 30));
+        assert_eq!(size_bytes("512M"), Some(512 << 20));
+        assert_eq!(size_bytes("1T"), Some(1 << 40));
+        assert_eq!(size_bytes("100K"), Some(100 << 10));
+        assert_eq!(size_bytes("123"), Some(123));
+        assert_eq!(size_bytes("lots"), None);
+        assert_eq!(Config::default().cache_limit, "20G");
     }
 }

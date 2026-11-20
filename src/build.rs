@@ -7,10 +7,10 @@ use agent_build_core::args::{self, Action, Outputs};
 use agent_build_core::json::{self, Json};
 use agent_build_core::report::{self, Outcome, Summary};
 use agent_build_core::xcresult::{self, Severity};
-use agent_build_core::{output, project, slot};
+use agent_build_core::{config, output, project};
 use agent_build_sys::lock::SlotLock;
 use agent_build_sys::run::{self, Ended, Stream};
-use agent_build_sys::{ignored, sync, xcresult as tool};
+use agent_build_sys::{cache, ignored, sync, xcresult as tool};
 use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
@@ -26,7 +26,7 @@ pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
     let _ = fs::remove_dir_all(&ctx.paths.result_bundle); // xcodebuild refuses an existing bundle; a missing one is fine
     let (dd, archive_s, bundle_s) = (text(&ctx.paths.derived_data), text(&archive), text(&ctx.paths.result_bundle));
     let outputs = Outputs { derived_data: &dd, archive: &archive_s, result_bundle: &bundle_s };
-    let mut argv = args::injected(ctx.inv.action, &outputs, &text(&slot::cas_path(&ctx.dirs.cache)), &ctx.config.cache_limit);
+    let mut argv = args::injected(ctx.inv.action, &outputs, &text(&ctx.paths.cas), &ctx.config.cache_limit);
     argv.extend(ctx.inv.args.iter().cloned());
     let program = std::env::var("AGENT_BUILD_XCODEBUILD").unwrap_or_else(|_| "xcodebuild".to_string());
     let log_path = log_path(ctx);
@@ -138,6 +138,9 @@ fn finish(ctx: &Context, run: &Run) {
     for line in report::output_lines(ctx.inv.action, run.ok, &products, &text(run.archive), bundle.as_deref()) {
         eprintln!("{line}");
     }
+    if let Some(line) = clear_cache_over_limit(ctx) {
+        eprintln!("{line}");
+    }
     let (n_errors, warnings) = (errors.len(), r.issues.len() - errors.len());
     let summary = Summary {
         ok: run.ok,
@@ -150,6 +153,19 @@ fn finish(ctx: &Context, run: &Run) {
         log: run.log,
     };
     eprintln!("{}", report::summary_line(&summary));
+}
+
+/// Xcode does not enforce COMPILATION_CACHE_LIMIT_SIZE, so the project's cache is cleared once a
+/// build leaves it over the limit. This runs under the slot lock, and the cache is this project's
+/// own, so no other build is using it.
+fn clear_cache_over_limit(ctx: &Context) -> Option<String> {
+    let limit = config::size_bytes(&ctx.config.cache_limit)?;
+    let used = cache::disk_usage(&ctx.paths.cas);
+    if used <= limit {
+        return None;
+    }
+    let cleared = fs::remove_dir_all(&ctx.paths.cas).is_ok();
+    Some(report::cache_cleared_line(used, &ctx.config.cache_limit, cleared))
 }
 
 /// P8: git-ignored files a failed build looked for, from its errors or, without them, its last lines.

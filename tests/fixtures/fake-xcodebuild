@@ -9,6 +9,9 @@ here() { pwd -P | sed -E 's#^/private/(var|tmp|etc)/#/\1/#'; }
 [ -n "$FAKE_TOUCH" ] && echo "changed by the build" >> "$FAKE_TOUCH"
 [ -n "$FAKE_OUTPUT" ] && cat "$FAKE_OUTPUT"
 [ -n "$FAKE_ERROR" ] && echo "$(here)/$FAKE_ERROR:1:1: error: boom" >&2
+if [ -n "$FAKE_CAS_BYTES" ]; then # grow the compilation cache it was given by this many bytes
+  for a in "$@"; do case "$a" in COMPILATION_CACHE_CAS_PATH=*) cas="${a#*=}"; mkdir -p "$cas"; head -c "$FAKE_CAS_BYTES" /dev/zero >> "$cas/blob" ;; esac; done
+fi
 if [ -n "$FAKE_XCRESULT" ]; then # make the result bundle xcodebuild was asked for
   prev=""; for a in "$@"; do [ "$prev" = "-resultBundlePath" ] && mkdir -p "$a"; prev="$a"; done
 fi
