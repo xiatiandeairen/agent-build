@@ -70,6 +70,19 @@ fn ignored_inputs_are_named_when_missing_and_mirrored_once_declared() -> TestRes
     assert_eq!(tree(&slot.join("gen")), tree(&a.join("gen")));
     assert_eq!(mtimes(&slot, &["gen/tool", "App/Gen.generated"]), before, "unchanged ignored files were rewritten");
 
+    // Unchanged files are skipped by size and modification time without reading them, so a change of
+    // the same size, a file the build rewrote in the slot, and a new executable bit must still arrive.
+    let header = slot.join("gen/lib/core.h");
+    write(&a.join("gen/lib/core.h"), "int core(own);\n");
+    assert_eq!(w.build(&a, &[]).code(), 0);
+    assert_eq!(fs::read_to_string(&header)?, "int core(own);\n", "a same-size change was skipped");
+    write(&header, "int core(bad);\n");
+    assert_eq!(w.build(&a, &[]).code(), 0);
+    assert_eq!(fs::read_to_string(&header)?, "int core(own);\n", "a file rewritten in the slot was kept");
+    fs::set_permissions(a.join("gen/lib/core.h"), fs::Permissions::from_mode(0o755))?;
+    assert_eq!(w.build(&a, &[]).code(), 0);
+    assert_eq!(tree(&slot.join("gen")), tree(&a.join("gen")));
+
     // No longer declared: removed from the slot, so the build cannot use a stale copy.
     write(&a.join(".agent-build.yaml"), "ignored_inputs:\n  - App/Gen.generated\n");
     assert_eq!(w.build(&a, &[]).code(), 0);

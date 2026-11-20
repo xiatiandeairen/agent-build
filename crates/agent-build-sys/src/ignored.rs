@@ -6,6 +6,7 @@ use crate::sync::{copy_if_differs, remove};
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 /// Mirrors each declared path from the worktree into the slot, and removes the paths an earlier
@@ -30,7 +31,16 @@ fn mirror(src: &Path, dst: &Path) -> io::Result<usize> {
         Err(e) => return Err(e),
     };
     if !meta.is_dir() {
-        return copy_if_differs(src, dst).map(usize::from);
+        if !meta.is_file() {
+            return copy_if_differs(src, dst).map(usize::from);
+        }
+        if unchanged_since_last_copy(&meta, dst) {
+            return Ok(0);
+        }
+        let wrote = copy_if_differs(src, dst)?;
+        // The slot copy carries the worktree's modification time, so the next run can skip it unread.
+        fs::File::open(dst)?.set_modified(meta.modified()?)?;
+        return Ok(usize::from(wrote));
     }
     if fs::symlink_metadata(dst).is_ok_and(|m| !m.is_dir()) {
         remove(dst)?;
@@ -50,6 +60,17 @@ fn mirror(src: &Path, dst: &Path) -> io::Result<usize> {
         }
     }
     Ok(written)
+}
+
+/// rsync's quick check: same size, modification time and permissions as the worktree file means
+/// the slot copy is the one the last run wrote. Reading both files every run cost 13x a stat of both
+/// (100,000 files). A slot file the build rewrote has a new modification time, so it is compared.
+fn unchanged_since_last_copy(src: &fs::Metadata, dst: &Path) -> bool {
+    let Ok(d) = fs::symlink_metadata(dst) else { return false };
+    d.is_file()
+        && d.len() == src.len()
+        && d.permissions().mode() & 0o777 == src.permissions().mode() & 0o777
+        && d.modified().ok().is_some_and(|t| src.modified().ok() == Some(t))
 }
 
 /// Of the paths a failed build mentioned, those that exist in the worktree, are missing from the
