@@ -96,7 +96,7 @@ fn after_kill_9_the_slot_stays_locked_until_the_leftover_xcodebuild_exits() {
     assert!(mtime(&w.path("b-started")) >= mtime(&w.path("a-done")), "took over while the leftover xcodebuild still ran");
 }
 
-// A6
+// A6, A7.5 (the test directory is under /private/var; the fake prints it as /var, like xcodebuild)
 #[test]
 fn a_failed_build_is_reported_as_is_once_with_its_exit_code_and_log() -> TestResult {
     let w = World::new("fail");

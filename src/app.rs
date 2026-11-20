@@ -69,7 +69,8 @@ fn prepare(argv: &[String]) -> Result<Context, Outcome> {
     let worktree = git::toplevel(&cwd).map_err(|_| usage("run agb inside a git repository (precondition P3)"))?;
     git::head(&worktree).map_err(|_| usage("the repository has no commit yet"))?;
     let prefix = git::prefix(&cwd).unwrap_or_default();
-    let dirs = config::dirs(|k| env::var(k).ok()).ok_or_else(|| usage("HOME is not set"))?;
+    let mut dirs = config::dirs(|k| env::var(k).ok()).ok_or_else(|| usage("HOME is not set"))?;
+    dirs.cache = slot::as_xcode_prints(&dirs.cache);
     let config = load_yaml(&dirs.config.join("config.yaml"), config::parse)?.unwrap_or_default();
     let ignored_inputs = load_yaml(&worktree.join(project::FILE), project::parse)?.unwrap_or_default();
     let common = git::common_dir(&worktree).map_err(|e| usage(&e.to_string()))?;

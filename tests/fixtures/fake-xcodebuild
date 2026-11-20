@@ -2,11 +2,13 @@
 # Stand-in for xcodebuild in integration tests. Each behaviour is switched on by an environment variable.
 [ -n "$FAKE_ARGS" ] && printf '%s\n' "$@" > "$FAKE_ARGS"
 [ -n "$FAKE_COUNT" ] && echo x >> "$FAKE_COUNT"
-[ -n "$FAKE_PWD" ] && pwd -P > "$FAKE_PWD"
+# Like xcodebuild, print paths under /private/var, /private/tmp and /private/etc without /private.
+here() { pwd -P | sed -E 's#^/private/(var|tmp|etc)/#/\1/#'; }
+[ -n "$FAKE_PWD" ] && here > "$FAKE_PWD"
 [ -n "$FAKE_STARTED" ] && touch "$FAKE_STARTED"
 [ -n "$FAKE_TOUCH" ] && echo "changed by the build" >> "$FAKE_TOUCH"
 [ -n "$FAKE_OUTPUT" ] && cat "$FAKE_OUTPUT"
-[ -n "$FAKE_ERROR" ] && echo "$(pwd -P)/$FAKE_ERROR:1:1: error: boom" >&2
+[ -n "$FAKE_ERROR" ] && echo "$(here)/$FAKE_ERROR:1:1: error: boom" >&2
 [ -n "$FAKE_SLEEP" ] && sleep "$FAKE_SLEEP"
 [ -n "$FAKE_DONE" ] && touch "$FAKE_DONE"
 exit "${FAKE_EXIT:-0}"

@@ -54,6 +54,17 @@ pub fn slot_paths(cache_dir: &Path, name: &str) -> SlotPaths {
     }
 }
 
+/// `path` as Xcode prints it. macOS links `/var`, `/tmp` and `/etc` to `/private/...`, and Xcode
+/// prints such paths without `/private`; the slot is spelled that way from the start, so the
+/// build runs there and its output is rewritten from there with a single spelling.
+pub fn as_xcode_prints(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    match s.strip_prefix("/private").filter(|rest| ["/var/", "/tmp/", "/etc/"].iter().any(|p| rest.starts_with(p))) {
+        Some(rest) => PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
+}
+
 /// The shared compilation cache directory.
 pub fn cas_path(cache_dir: &Path) -> PathBuf {
     cache_dir.join("cas")
@@ -87,5 +98,15 @@ mod tests {
         assert_ne!(a.lock, b.lock);
         assert_eq!(a.lock, slot_paths(c, &slot_name(Some("u:a/one.git"), "/other")).lock);
         assert!(a.src.starts_with(&a.root) && a.derived_data.starts_with(&a.root));
+    }
+
+    // A7.5
+    #[test]
+    fn slot_paths_are_spelled_the_way_xcode_prints_them() {
+        assert_eq!(as_xcode_prints(Path::new("/private/var/folders/x/T/c")), PathBuf::from("/var/folders/x/T/c"));
+        assert_eq!(as_xcode_prints(Path::new("/private/tmp/c")), PathBuf::from("/tmp/c"));
+        assert_eq!(as_xcode_prints(Path::new("/Users/me/.cache")), PathBuf::from("/Users/me/.cache"));
+        assert_eq!(as_xcode_prints(Path::new("/private/varnish/c")), PathBuf::from("/private/varnish/c"));
+        assert_eq!(as_xcode_prints(Path::new("/private/Users/c")), PathBuf::from("/private/Users/c"));
     }
 }
