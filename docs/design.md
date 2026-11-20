@@ -1,11 +1,11 @@
 # agent-build 方案（iOS/macOS 极速编译）
 
 
-**状态：** 已实现（Rust，本仓库）。验收用例与每条的状态见 [cases.md](cases.md)；除 A10（my-app 实测，等接入方满足 P8）外全部通过。
+**状态：** 已实现（Rust，本仓库）。验收用例与每条的状态见 [cases.md](cases.md)；除 A10（my-app 实测，等接入方在 `.agent-build.yaml` 里声明 rust-core 产物）外全部通过。
 
 **一句话方案：** 每个项目在本机有一个固定路径的构建槽（git 克隆 + 常驻 DerivedData），agent 从任何 worktree 编译时，agent-build 把代码同步进这个槽再调用 xcodebuild；路径固定让 Xcode 的增量编译跨 worktree 继续有效，所有槽共用一份编译缓存，来回切换分支时编过的部分直接命中。
 
-**例子：** agent 在新 worktree 里运行 `agent-build xcodebuild build -scheme App`。agent-build 用这个项目的槽（昨天编过 develop），切到这次的提交，只重写内容变了的文件，再让 Xcode 增量编译。实测首编从冷编译 178 秒降到 45 秒。
+**例子：** agent 在新 worktree 里运行 `agb xcodebuild build -scheme App`。agent-build 用这个项目的槽（昨天编过 develop），切到这次的提交，只重写内容变了的文件，再让 Xcode 增量编译。前期原型实测首编从冷编译 178 秒降到 45 秒（当前版本待 A10 复测）。
 
 ## 目标、范围与前提
 
@@ -44,7 +44,7 @@
 | P5 | 编译流程里的脚本和代码生成器不改写被 git 跟踪的文件；生成物放构建目录，必须放仓库里的内容没变时不重写 | 同上 |
 | P6 | 编译结果只取决于源码和工具链；宏插件这类构建工具编出来的结果可复现 | 照常正确编译，复用变少；不自动检测，见 G6 |
 | P7 | 缓存只在单机内共享 | — |
-| P8 | 从干净的 git 检出、在任意目录下直接运行 xcodebuild 就能编过（不写死 worktree 的绝对路径，不往构建目录之外写东西）；编译需要的东西由工程自己在 SwiftPM 解析或构建步骤里准备，不依赖被 git 忽略的本地生成文件（未提交、未忽略的改动会照常同步） | 用不了：构建槽里没有被忽略的文件；xcodebuild 的报错原样输出，不额外提示（问题出现再说） |
+| P8 | 从干净的 git 检出、在任意目录下直接运行 xcodebuild 就能编过（不写死 worktree 的绝对路径，不往构建目录之外写东西）；编译需要的东西由工程自己在 SwiftPM 解析或构建步骤里准备；依赖被 git 忽略的本地文件（生成代码、`Pods/`、编好的 xcframework）时，在仓库根目录的 `.agent-build.yaml` 里声明（未提交、未忽略的改动会照常同步） | 没声明的被忽略文件不在槽里，编译失败；agent-build 在失败时点名它是哪个被忽略的文件、该怎么声明 |
 
 ### 核心例子
 
@@ -59,7 +59,7 @@
 | G5 典型 | 在同一个槽里 A → B → A 来回切换提交 | 每次的结果都和从零编译该提交完全一致 |
 | G5 易误解 | 改了 ObjC 头之后，增量编译报"找不到符号" | 设计上就不该出现；"出错后自动清掉重编"不算满足 G5 |
 | G6 | 一个不满足 P4 的工程编完一次 | 看到命中多少、各阶段耗时，以及哪些 target 没开 explicit modules |
-| G7 | 一个普通的 Swift iOS 工程，没有配置文件 | 直接 `agent-build xcodebuild build -scheme App` 就能用 |
+| G7 | 一个普通的 Swift iOS 工程，没有配置文件 | 直接 `agb xcodebuild build -scheme App` 就能用 |
 | G8 | 修改同步规则 | 用例马上指出改坏了哪种情况；不引入新依赖 |
 
 ## 取舍优先级与总览
@@ -94,10 +94,11 @@ G8 代码质量是贯穿的约束，不参与排序。
 | D2 | 排队与资源管控 | 交给 aq；agent-build 只用槽锁保证同一槽不被同时写 | 复用现有机制，不另造一套 |
 | D3 | 产物 | 不导出，输出里直接给槽内产物路径 | 冲突几乎碰不到，导出目录还要设计清理 |
 | D4 | 编译前步骤 | 不提供；编译需要的东西归工程自己准备（前提 P8） | 职责边界：工程怎么准备是接入方的事 |
-| D5 | 命令形态 | 在原命令前加 `agent-build`：`agent-build xcodebuild …`；本期只接受 xcodebuild | 给以后的 `agent-build cargo …` 留位置，agent 只需加一个词 |
+| D5 | 命令形态 | 在原命令前加 `agb`（agent-build 的命令名；不用 `ab`，因为 macOS 自带 `/usr/sbin/ab`）：`agb xcodebuild …`；本期只接受 xcodebuild | 给以后的 `agb cargo …` 留位置，agent 只需加一个词 |
 | D6 | 项目名与位置 | agent-build，`~/Workspace/self/agent-build` | 直白，和 agent-verify 同一风格，不绑定语言 |
 | D7 | 技术选型 | Rust，照搬 agent-quay 的工程骨架（core / sys / 二进制三层、clippy deny、just check），零第三方依赖 | 以后扩到 Rust 和 Linux CI；复用你现有的骨架 |
-| D8 | 配置 | 只有全局 `cache_limit` 一项（XDG、YAML 平铺键值），没有项目配置 | G7；配置不理解项目概念 |
+| D8 | 配置 | 全局只有 `cache_limit` 一项（XDG、YAML 平铺键值），不理解项目 | G7；配置不理解项目概念 |
+| D9 | 被 git 忽略的编译输入（P8） | 项目在提交进仓库的 `.agent-build.yaml` 里声明，同步时与被跟踪的文件同样对待；没声明的在编译失败时点名 | 槽的正确性是"在槽里编和在 worktree 里编结果一样"，被忽略的输入是唯一的缺口；只有项目知道哪些被忽略的文件是输入，所以由项目声明（同 Docker 构建上下文、Bazel 声明输入）。比过：全复制被忽略文件（会带进 DerivedData、`node_modules`，又慢又编出过时结果）、在槽里跑生成脚本（D4，越界） |
 
 ## 对外接口
 
@@ -106,17 +107,18 @@ G8 代码质量是贯穿的约束，不参与排序。
 ### 命令
 
 ```
-agent-build xcodebuild <xcodebuild 参数...>
+agb xcodebuild <xcodebuild 参数...>
 ```
 
 | 用法 | 例子 |
 | --- | --- |
-| 本机编译 | `agent-build xcodebuild build -workspace App.xcworkspace -scheme App -destination 'generic/platform=iOS Simulator'` |
-| 本机测试 | `agent-build xcodebuild test -scheme Modules-Package -destination 'id=…'` |
-| 从零编译 | `agent-build xcodebuild clean build -scheme App`（clean 交给 xcodebuild） |
+| 本机编译 | `agb xcodebuild build -workspace App.xcworkspace -scheme App -destination 'generic/platform=iOS Simulator'` |
+| 本机测试 | `agb xcodebuild test -scheme Modules-Package -destination 'id=…'` |
+| 从零编译 | `agb xcodebuild clean build -scheme App`（clean 交给 xcodebuild） |
 
 - 参数原样交给 xcodebuild；输出位置由工具接管：`-derivedDataPath`、`-archivePath`、`-resultBundlePath` 传了会被丢掉并提示。产物、测试结果、归档都留在槽里，输出末尾给出各自的路径；要放到别处由调用方自己复制。`-exportArchive` 不编译，本期不支持。
-- 退出码：0 成功；编译失败原样返回 xcodebuild 的退出码；2 参数错误；3 同步失败；第一个词不是 xcodebuild 时报参数错误（2）。
+- 终端输出：见 S5。
+- 退出码：0 成功；编译失败原样返回 xcodebuild 的退出码；64 参数错误（与 xcodebuild 自己的参数错误相同，sysexits 的 EX_USAGE）；125 同步失败（沿用 GNU env、timeout 表示"包装器自己失败"的惯例）；被信号终止为 128 + 信号号。
 
 ### 全局配置（可以没有）
 
@@ -128,6 +130,19 @@ cache_limit: 40G    # 共用编译缓存上限
 - 只有一个键，没有项目概念。
 - 格式是 YAML 的最小子集：只认 `键: 值` 和 `#` 注释，其他写法报错退出；自写解析约 20 行，保住 G8 的零依赖。
 - agent-build 只读不写这个文件。
+
+### 项目文件（可以没有）
+
+```yaml
+# <仓库根目录>/.agent-build.yaml，由项目提交进仓库；从 worktree 读取
+ignored_inputs:      # 编译需要、但被 git 忽略的路径（文件或目录），相对仓库根目录
+  - rust-core/build/
+  - App/Generated.swift
+```
+
+- 只有这一个键，只属于这个项目，全局配置仍然不理解项目。
+- 列出的路径同步时与被跟踪的文件同样对待：内容、可执行位、符号链接不同才写；worktree 里没有的从槽里删掉；从列表里去掉的路径下次同步时从槽里删掉，编译不会用到过时的副本。
+- 写错（绝对路径、`..`、未知键）退出码 64，指出行号，不编译。
 
 ## 存储结构
 
@@ -143,7 +158,9 @@ $XDG_CACHE_HOME/agent-build/               全部可删，删了只会变慢
         ├── dd/                            DerivedData，含 SourcePackages
         ├── lock                           flock 锁文件：agent-build 持有，并交给 xcodebuild 继承；最后一个持有进程退出时由内核释放
         ├── owner                          当前持有者（pid、worktree），等待者据此输出在等谁
-        └── state.json                     当前提交、上次复制进来的未提交文件
+        ├── archives/                      archive 的产物
+        ├── result.xcresult                最近一次运行的结果包，每次运行前重建
+        └── ignored_inputs                 上次同步的被忽略路径列表，用来删掉不再声明的路径
 $XDG_STATE_HOME/agent-build/
 └── logs/                                  完整的 xcodebuild 日志，保留最近若干份
 ```
@@ -160,7 +177,7 @@ build 和 test 走同一条流程，共 6 步；每步对应下面一个机制�
 1. **解析参数**：参数全部交给 xcodebuild，只丢掉`输出位置参数（-derivedDataPath、-archivePath、-resultBundlePath）`。读 `config.yaml`，没有就用默认值（S6）。
 2. **定位**：worktree 根目录、当前提交、未提交改动列表、仓库标识。
 3. **认领槽**（S1）：用本项目的槽（没有就创建）并加锁；槽正被占用就等它释放，并输出在等哪个 worktree 的编译。
-4. **同步**（S2）：把槽里的代码变成和 worktree 一样，只重写内容不同的文件。失败退出码 3。
+4. **同步**（S2）：把槽里的代码变成和 worktree 一样，只重写内容不同的文件。失败退出码 125。
 5. **编译**（S3、S4）：运行 xcodebuild，加上槽的 DerivedData 和缓存设置；输出实时转发。
 6. **收尾**（S5）：核对 P4、P5，写汇总，释放锁，返回 xcodebuild 的退出码。
 
@@ -177,9 +194,10 @@ build 和 test 走同一条流程，共 6 步；每步对应下面一个机制�
 
 ### S2 同步（G1、G5）
 
-- **选择**：新槽从本机仓库克隆，不联网 → 缺提交时从调用方仓库 fetch → 强制切到该提交 → 清掉多余文件 → 未提交改动用 rsync 按内容比较复制 → 子模块按调用方 worktree 的状态递归镜像（没初始化的就不初始化，不联网）。
+- **选择**：新槽从本机仓库克隆，不联网 → 缺提交时从调用方仓库 fetch → 强制切到该提交 → 清掉多余文件 → 未提交改动按内容、可执行位、符号链接比较，只写不同的文件 → 子模块按调用方 worktree 的状态递归镜像（没初始化的就不初始化，不联网）→ 项目声明的被忽略路径按同样的比较镜像（D9）。
+- **开销**：声明一个 2 万个文件、156MB 的目录（模拟 `Pods/`），首次同步 2.2 秒，之后每次 0.8 秒，有没有改动都一样，因为要读两边内容比较（release 构建、文件已在系统缓存里，实测）。
 - **比过的候选**：每次全量拷贝（会改所有文件的修改时间，增量失效）；git worktree（受调用方 worktree 删除影响）。
-- **出错与恢复**：同步失败（例如磁盘满）→ 退出码 3，不编译；下次同步先强制切换再清理，槽不会卡在半同步状态。
+- **出错与恢复**：同步失败（例如磁盘满）→ 退出码 125，不编译；下次同步先强制切换再清理，槽不会卡在半同步状态。
 
 ### S3 共用编译缓存（G1、G4）
 
@@ -199,30 +217,41 @@ build 和 test 走同一条流程，共 6 步；每步对应下面一个机制�
 
 ### S5 输出与前提核对（G6）
 
-| 输出 | 怎么得到 | 开销 |
-| --- | --- | --- |
-| 汇总行：槽、同步耗时、编译耗时、命中/未命中、日志位置、产物路径 | 数日志里的缓存提示行 | 无 |
-| 阶段耗时：解析依赖、依赖图、规划、执行 | 按输出标记切分，沿用测量工具已验证的做法 | 无 |
-| P4 没满足的 target | 日志里的 "caching requires explicit module build" 警告 | 无 |
-| P5 被改写的文件 | 编完在槽里 `git status` | 约 0.4 秒（实测） |
-| 未命中最多的 target（P6 自查入口） | 按 target 汇总缓存提示行 | 无 |
+- **选择**：编译期间 xcodebuild 的原始输出只进日志，终端只有一行起始提示（含日志路径）；编完用 `xcrun xcresulttool` 读 agb 注入的结果包（`-resultBundlePath <槽>/result.xcresult`），按下表输出。只打印信息的命令（`-showBuildSettings`、`-list` 等）没有结果包，原样输出。
+- **比过的候选**：从滚动的原始输出里按文字匹配取数（Apple 改输出格式就悄悄失效，同一个错误在原始输出里会重复多次）；原样转发全部输出（agent 要读几千行才找到错误）。结果包是 Xcode 给工具读的结构化结果，字段有类型。
 
-- 输出里的槽路径改写成 worktree 路径，否则 agent 会去改槽里的文件；逐条的缓存提示每次几千行，隐藏。
+| 输出 | 来源（都是 xcresulttool 的 JSON） | 开销 |
+| --- | --- | --- |
+| 错误，按 `路径:行:列: error: 信息` | `get build-results` 的 `errors`（位置从 `sourceURL` 取，行列从 0 数，加 1） | 样例工程 22ms（实测） |
+| 失败的测试和原因（只在 test） | `get test-results summary` 的 `testFailures` | 同上量级 |
+| 命中/未命中 | `get log --type build` 根节点的 `BuildOperationMetrics` 附件（Xcode 自己的计数） | 样例工程 52ms（实测），大工程未测 |
+| 未命中最多的 target（P6 自查入口） | build log 里带缓存未命中提示的任务，按任务所属 target 汇总 | 同上 |
+| 阶段耗时：解析依赖、依赖图、规划、执行 | build log 顶层各节的 `duration` | 同上 |
+| P4 没满足的 target | `build-results` 里有"caching requires explicit module build"警告时，Swift 编译任务都没有缓存提示的 target | 同上 |
+| P5 被改写的文件 | 编完在槽里 `git status` | 约 0.4 秒（实测） |
+| P8 缺的被忽略文件（只在编译失败时） | 从错误里找出槽内路径，挑出 worktree 里有、槽里没有、被 git 忽略的 | 无 |
+| 结果包、产物、归档路径（编译失败时只给结果包：产物可能是旧的或不存在） | 槽里的固定位置 | 无 |
+| 汇总行：结果、槽、同步耗时、编译耗时、命中/未命中、错误数、警告数、日志位置 | 以上各项 | 无 |
+
+- 路径改写：输出里的槽路径改写成 worktree 路径，否则 agent 会去改槽里的文件。macOS 的 `/var`、`/tmp`、`/etc` 是指向 `/private/...` 的链接，Xcode 输出这类路径时会去掉 `/private`；所以 agb 算出槽路径时就统一成 Xcode 的写法（`/private/tmp/…` 记作 `/tmp/…`），编译和改写都用这一种写法。
+- **出错与恢复**：编译失败但读不到结果包（工程文件读不了、xcodebuild 没起来）→ 输出原始输出的最后 30 行，不让失败无声。结果包每次运行前删掉重建，只保留最近一次。
+- **反例**：Xcode 改了结果包的字段名 → 读不到的项为空（错误列表空、计数为 0），编译结果和退出码不受影响；失败时有原始输出最后 30 行兜底。冒烟测试用真 xcresulttool 校验一次编译错误能读出来。
 - 输出末尾示例：
 
 ```
-agent-build: phases resolve=7.7s graph=5.5s plan=2.0s execute=18.6s
-agent-build: precondition P4 not met: App (explicit modules off) — its Swift compiles are not cached
-agent-build: top misses: MXAIModule 15, MXAIUIModule 8
-agent-build: ok slot=my-app sync=1.1s build=35.9s cache hit=46 miss=23 log=~/.local/state/agent-build/logs/…
-agent-build: products=~/.cache/agent-build/slots/my-app-1a2b3c4d/dd/Build/Products/Debug-iphonesimulator
+/Users/me/my-app/App/Login.swift:42:9: error: Cannot find 'session' in scope
+agb: phases resolve=7.7s graph=5.5s plan=2.0s execute=18.6s
+agb: precondition P4 not met: App (explicit modules off) — their Swift compiles are not cached
+agb: top misses: MXAIModule 15, MXAIUIModule 8
+agb: results=~/.cache/agent-build/slots/my-app-1a2b3c4d/result.xcresult
+agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 errors=1 warnings=12 log=~/.local/state/agent-build/logs/…
 ```
 
 ### S6 配置与默认值（G7）
 
 - 没有 `config.yaml` 时：`cache_limit` = 40G。
 - 40G 的来源：本次实验磁盘告急（94%）后定的预算，不是测量最优值。
-- 不提供任何按项目的配置；编译前需要准备的东西归工程自己（P8）。
+- 全局配置不按项目区分；项目只能在自己仓库的 `.agent-build.yaml` 里声明被忽略的编译输入（D9），编译前需要准备的东西仍归工程自己（D4）。
 
 ## 多项目与多 worktree（G3）
 
@@ -240,7 +269,7 @@ agent-build 只负责两件事：把 worktree 原样同步进固定路径的槽�
 | N1 | agent-build | 同步漏了变化：内容变了的文件没重写，或槽里有 worktree 没有的文件 | 结果和从零编译不一致（G5 失败） | 这是我们的 bug，用例守住：任一提交和未提交状态同步后，槽里的被跟踪和未忽略文件与 worktree 逐字节相同 |
 | N2 | Xcode | 增量判断或缓存 key 出错 | 结果错或报了不该有的错 | 不重试、不清理；保留完整日志。用户可自己 `clean build` 或删槽 |
 | N3 | Xcode | Xcode 升级改了缓存行为（P2） | 命中率变化 | 不保证；升级后重新验证 |
-| N4 | 工程 | 依赖被 git 忽略的本地文件（P8） | 在槽里编不过 | xcodebuild 报错原样输出 |
+| N4 | 工程 | 依赖被 git 忽略的本地文件（P8） | 在槽里编不过 | 声明进 `.agent-build.yaml`（D9）；没声明时编译失败，输出点名缺的被忽略文件 |
 | N5 | 工程 | 构建脚本写死了 worktree 的绝对路径，或往槽和 DerivedData 之外写东西 | 编译读写到错误位置，可能串到别的 worktree | 不检测；属于 P8（从干净检出、任意路径都能编）的一部分 |
 | N6 | 工程 | 没开 explicit modules（P4）、改写被跟踪文件（P5）、宏插件不可复现（P6） | 正确但变慢；P5 还会让每次同步都把被改写的文件改回去，触发重编 | P4、P5 在输出里指出；P6 只列未命中最多的 target |
 | N7 | 工程 | 子模块在调用方 worktree 里没初始化（P3） | 槽里同样没有，编不过 | 原样镜像 worktree，不替工程联网初始化 |
@@ -316,7 +345,7 @@ T1 工程骨架 ──┬── T2 core 判断逻辑 ──┐
 | 替调用方联网初始化子模块 | 属于替工程做准备；槽只镜像 worktree | S2 |
 | 关闭代码索引（COMPILER\_INDEX\_STORE\_ENABLE=NO） | 不是缓存需要的设置，改变了工程的编译产出 | S3：只注入缓存必需的设置 |
 
-**检查过、决定保留的**：输出路径改写、隐藏缓存提示、中断处理、P4/P5 核对和阶段耗时，理由分别写在 S2、S5 和横切项里。
+**检查过、决定保留的**：输出路径改写、中断处理、P4/P5 核对和阶段耗时，理由分别写在 S2、S5 和横切项里。
 
 ## 证据与数据来源
 
@@ -324,7 +353,7 @@ T1 工程骨架 ──┬── T2 core 判断逻辑 ──┐
 
 | 结论 | 数字 | 等级 | 来源 |
 | --- | --- | --- | --- |
-| 热槽让新 worktree 首编变快 | 178 秒 → 45 秒 | 已运行 | 基准测试，my-app，约 2400 个 Swift 文件，Xcode 27.2 |
+| 热槽让新 worktree 首编变快 | 178 秒 → 45 秒 | 已运行（前期原型；当前版本待 A10 复测） | 基准测试，my-app，约 2400 个 Swift 文件，Xcode 27.2 |
 | 宏插件重编导致未命中 | 23 个编译未命中，命中率 66.7% | 已运行 | s7-macro-rebuilt；[Swift 论坛同类问题](https://forums.swift.org/t/compile-cache-key-instability-from-non-deterministic-macro-plugin-binaries/86695) |
 | Xcode 增量判断正确 | 4 个实验共 12 步全对 | 已运行 | g5 系列实验，`g5/*.txt` |
 | 本机同项目编译请求不重叠（支撑一个项目一个槽） | 30 天 122 次、零重叠；每天中位 2 个 worktree、最多 7 个 | 已运行 | Claude 会话记录统计（2026-10-20 至 11-19）；不含后台编译、手动终端编译和 CI |
