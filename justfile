@@ -23,10 +23,10 @@ deps:
 cases:
     scripts/check-cases.py
 
-# The real xcodebuild on tests/fixtures/SampleApp (a minute or two). Run before every delivery;
-# on a shared machine queue it: `aq run -- just smoke`
+# The real xcodebuild on the sample projects in tests/fixtures (a few minutes; borrows an iOS
+# simulator through aq). Run before every delivery, queued: `aq run -- just smoke`
 smoke:
-    cargo test --test smoke -- --ignored
+    scripts/smoke.sh
 
 # Install to ~/.local/bin/agb
 install:
