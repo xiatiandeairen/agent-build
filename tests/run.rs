@@ -44,7 +44,8 @@ fn builds_of_one_project_take_turns_and_say_whom_they_wait_for() {
     let first_pid = first.id();
     let first = finish(first);
     assert_eq!((first.code(), second.code()), (0, 0), "{}\n{}", first.all(), second.all());
-    assert!(second.stderr().contains(&format!("waiting for the slot: pid {first_pid}")), "{}", second.all());
+    let waiting = format!("waiting for the slot: pid {first_pid}, worktree {}", a.display());
+    assert!(second.stderr().contains(&waiting), "{}", second.all());
     assert!(mtime(&w.path("b-started")) >= mtime(&w.path("a-done")), "the second build started before the first ended");
 }
 

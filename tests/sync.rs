@@ -157,3 +157,62 @@ fn the_worktree_is_left_untouched_and_nothing_goes_to_the_network() -> TestResul
     assert_eq!(fs::read_to_string(slot.join("App/A.swift"))?, "let a = 5\n");
     Ok(())
 }
+
+/// The path as xcodebuild prints it: without the `/private` macOS adds in front of /var and /tmp.
+fn as_printed(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy().into_owned();
+    s.strip_prefix("/private").filter(|r| r.starts_with("/var/") || r.starts_with("/tmp/")).map(String::from).unwrap_or(s)
+}
+
+// A1.5
+#[test]
+fn from_a_subdirectory_xcodebuild_runs_in_the_same_subdirectory_of_the_slot() -> TestResult {
+    let w = World::new("subdir");
+    let a = repo(&w.path("app"));
+    write(&a.join("ios/Pkg/Sources/P.swift"), "let p = 1\n");
+    commit_all(&a, "ios dir");
+    let sub = a.join("ios/Pkg");
+    let pwd = w.path("pwd");
+    let env =
+        [("FAKE_PWD", pwd.to_string_lossy().into_owned()), ("FAKE_ERROR", "Sources/P.swift".to_string()), ("FAKE_EXIT", "65".to_string())];
+    let r = w.build(&sub, &env);
+    assert_eq!(r.code(), 65, "{}", r.all());
+    assert_eq!(fs::read_to_string(&pwd)?.trim(), as_printed(&w.slot_src().join("ios/Pkg")), "xcodebuild ran elsewhere");
+    assert!(r.stderr().contains(&format!("{}/Sources/P.swift:1:1: error: boom", sub.display())), "{}", r.all());
+    Ok(())
+}
+
+// A18
+#[test]
+fn shallow_clones_sync_like_full_ones() -> TestResult {
+    let w = World::new("shallow");
+    let origin = repo(&w.path("origin"));
+    let url = format!("file://{}", origin.display());
+    let shallow = |name: &str| {
+        let dir = w.path(name);
+        git(&w.root, &["clone", "-q", "--depth", "1", &url, &dir.to_string_lossy()]);
+        assert!(dir.join(".git/shallow").exists(), "{name} is not a shallow clone");
+        dir
+    };
+    let ci1 = shallow("ci1");
+    let r = w.build(&ci1, &[]);
+    assert_eq!(r.code(), 0, "first shallow clone: {}", r.all());
+    assert_eq!(snapshot(&w.slot_src()), snapshot(&ci1));
+
+    write(&origin.join("App/A.swift"), "let a = 2\n");
+    commit_all(&origin, "second");
+    git(&ci1, &["fetch", "-q", "--depth", "1", "origin"]);
+    git(&ci1, &["checkout", "-q", "FETCH_HEAD"]);
+    let r = w.build(&ci1, &[]);
+    assert_eq!(r.code(), 0, "after a shallow fetch: {}", r.all());
+    assert_eq!(snapshot(&w.slot_src()), snapshot(&ci1));
+
+    fs::remove_dir_all(&ci1)?;
+    write(&origin.join("App/B.swift"), "let b = 3\n");
+    commit_all(&origin, "third");
+    let ci2 = shallow("ci2");
+    let r = w.build(&ci2, &[]);
+    assert_eq!(r.code(), 0, "a new shallow clone on the same slot: {}", r.all());
+    assert_eq!(snapshot(&w.slot_src()), snapshot(&ci2));
+    Ok(())
+}

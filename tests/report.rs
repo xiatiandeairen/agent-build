@@ -46,6 +46,15 @@ fn a_failed_build_shows_its_errors_from_the_result_bundle_and_not_the_raw_output
     assert!(!r.all().contains("BUILD FAILED"), "raw xcodebuild output reached the terminal: {}", r.all());
     let log = fs::read_to_string(err.lines().last().and_then(|l| l.split("log=").nth(1)).expect("log path"))?;
     assert!(log.contains("** BUILD FAILED **"), "the log keeps the raw output");
+
+    // The next sync puts the file the build rewrote back to the worktree's content.
+    let again = w.build(&a, &[]);
+    assert!(!again.stderr().contains("P5 not met"), "{}", again.all());
+    assert_eq!(
+        fs::read_to_string(w.slot_src().join("App/B.swift"))?,
+        fs::read_to_string(a.join("App/B.swift"))?,
+        "the next run restores it"
+    );
     Ok(())
 }
 
