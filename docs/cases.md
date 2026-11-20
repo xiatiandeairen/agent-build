@@ -19,13 +19,15 @@
 | A7 | 假 xcodebuild 配合用真 Xcode 录制的结果包 JSON（`tests/fixtures/xcresult`，由假 xcresulttool 提供）→ 编译期间终端只有一行起始提示，原始输出只进日志；编完依次输出错误（`路径:行:列: error: …`，路径已改写）、失败的测试、阶段耗时、P4、未命中最多的 target、P5、结果包和产物路径、汇总行（含 errors、warnings）；失败但读不到结果包时，输出原始输出的最后 30 行；下次同步把被改写的文件改回 | G6 的输出整体对不上：缺行、顺序乱、刷屏；失败时看不到原因 | 集成 | 已实现 |
 | A8 | 没有配置文件 → 每个项目的缓存上限 20G，缓存目录在这个项目的槽里；写 `cache_limit: 10G` → 传给 xcodebuild 的是 10G；配置写错 → 退出码 64，指出行号 | 配置没生效或写错时被悄悄忽略 | 集成 | 已实现 |
 | A9 | `just check` 一条命令跑完格式、clippy（禁止 unwrap/expect/panic，函数 ≤ 60 行）、全部单元和集成、单文件 ≤ 400 行、无第三方依赖、用例表核对 | 代码质量约束悄悄退化 | 实测 | 已实现 |
-| A11 | 工程依赖被 git 忽略的文件（P8）：没声明时编译失败 → 输出点名这个被忽略的文件和声明方法，被跟踪的文件报错不点名；在 `.agent-build.yaml` 声明后 → 文件、目录、可执行位、符号链接原样进槽，只重写变化的文件，worktree 里删掉的槽里也删；从声明里去掉 → 槽里删掉；声明写错 → 退出码 64 带行号，不编译 | 编出来的东西用了过时的被忽略文件；失败时报错指向 worktree 里明明存在的文件，让人找错方向 | 集成 | 已实现 |
+| A11 | 工程依赖被 git 忽略的文件（P8）：没声明时编译失败、错误里带着这个文件的路径 → 输出点名这个被忽略的文件和声明方法（错误里只有符号名、没有路径时无从点名），被跟踪的文件报错不点名；在 `.agent-build.yaml` 声明后 → 文件、目录、可执行位、符号链接原样进槽，只重写变化的文件，worktree 里删掉的槽里也删；从声明里去掉 → 槽里删掉；声明写错 → 退出码 64 带行号，不编译 | 编出来的东西用了过时的被忽略文件；失败时报错指向 worktree 里明明存在的文件，让人找错方向 | 集成 | 已实现 |
 | A12 | 样例 SampleWorkspace 放在仓库的 `ios/` 子目录（`-workspace`，App 依赖一个本地 SwiftPM 包，包里有 Swift 和 ObjC 两个 target，ObjC 公开头被 Swift 引用），整个仓库放在路径含空格和中文的目录下；在 `ios/` 里 `agb xcodebuild build -workspace SampleWorkspace.xcworkspace -scheme App -destination 'generic/platform=iOS Simulator'` → 退出码 0，产物目录里有 App.app；不改再编 → `miss=0`；ObjC 公开头加一个方法声明再编 → 退出码 0；造一个编译错误 → 错误行指向 worktree 里含空格和中文的路径；`agb xcodebuild -resolvePackageDependencies -workspace SampleWorkspace.xcworkspace -scheme App` → 退出码 0，没有 `products=` 行 | 真 xcodebuild 只跑过 `-project` 纯 Swift；公开样本里 workspace 50%、子目录 34%、ObjC 混编 39%、本地包 28% | 冒烟 | 已实现 |
 | A13 | 在 SampleWorkspace 的包目录里 `agb xcodebuild test -scheme <包>-Package -destination 'id=<iOS 模拟器>' -only-testing:<一个改成失败的测试>` → 退出码 65，输出 `agb: test failed: <该测试>`；改回后退出码 0；回 `ios/` 不改代码再编 App → `miss=0`（切换容器会让部分任务重做，但全部命中编译缓存，不重新编译） | 在包目录里只给 `-scheme` 的 CI 占 18%；workspace 和包两种容器轮流用同一个 DerivedData，互相作废时每次切换都重编，G1 悄悄失效 | 冒烟 | 已实现 |
 | A14 | SampleApp：`agb xcodebuild build-for-testing -project SampleApp.xcodeproj -scheme CoreTests -destination platform=macOS` → 产物目录里有 `.xctestrun`；`agb xcodebuild test-without-building -xctestrun <它> -destination platform=macOS` → 退出码 0；一个测试失败时输出 `agb: test failed: …` | 14% / 11% 的 CI 用两段式；agb 给第二段注入的 `-derivedDataPath` 和结果包，真 xcodebuild 是否接受没验证过 | 冒烟 | 已实现 |
+| A15 | 4 个公开 app 声明好被忽略的输入后（声明只在本地，不提交上游）：Swiftfin 模拟器 build；NetNewsWire 声明构建阶段生成的 `SecretKey.swift`、跑 macOS 测试计划；Bark 先 `pod install`、声明 `Pods/`、用 workspace build；GitUp（子模块）在 `GitUpKit` 子目录跑 macOS 测试 → 每个退出码 0；编完槽里 `git status` 干净，或 P5 行点名被改写的文件；不声明直接编 Bark → 失败并点名 `Pods/` 下缺的文件（错误里带路径）；记录每个 app 的 sync 耗时和读结果包耗时 | 远程 SwiftPM + 宏、CocoaPods、构建阶段生成的文件、子模块 + 纯 ObjC + macOS，样例工程证明不了；P8 点名在真实报错里能否找对文件；大工程上同步和读结果包的耗时 | 实测 | 待实现 |
+| A16 | 用临时 XDG 目录写 `cache_limit: 2G`，在 Swiftfin 上冷编一次 → 编完缓存超过 2G 时，输出 `cache … exceeded cache_limit 2G and was cleared`，这个项目的缓存目录被删掉；再编一次 → 退出码 0 | Xcode 27.2 不执行 `COMPILATION_CACHE_LIMIT_SIZE`（实测设 2G 长到 3.1G）；agb 不清理时磁盘只增不减，后果难撤回 | 实测 | 待实现 |
 | A17 | SampleApp：`agb xcodebuild archive -project SampleApp.xcodeproj -scheme App -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO` → 退出码 0，输出的 `archive=` 路径存在，里面有 `Products/Applications/App.app` | 21% 的 CI 直接 archive；注入的 `-archivePath` 和 archive 路径只在单元层测过 | 冒烟 | 已实现 |
 | A18 | 调用方是 `--depth 1` 浅克隆 → 建槽成功，同步后逐字节相同；调用方再 `git fetch --depth 1` 到更新的提交 → 再次同步成功；删掉调用方，同一 origin 的新浅克隆（更新的提交）→ 用同一个槽同步成功，退出码 0 | 67% 的 CI 检出是浅克隆；槽从调用方本地 fetch，浅仓库之间互相 fetch 可能缺对象或被拒；出错时持久 runner 上每次 CI 都以 125 失败，G4 落空 | 集成 | 已实现 |
-| A10 | my-app 上：新 worktree 首编、A → B → A 切回时的缓存命中、改 ObjC 公开头后增量不报错、产物与从零编译的可复现部分逐字节一致、CI 新分支增量；记录耗时和命中数 | 验证 Xcode 在真实工程上的表现，样例工程证明不了 | 实测 | 待实现 |
+| A10 | 价值验证：在公开 app 上按下方"价值验证"表跑 V1–V7（同机、交替跑基准和 agb、各 3 次取中位数、开跑前负载低于 CPU 核数），每项达到它的通过线；切回已编过的提交时产物可复现部分与冷编逐字节一致 | 速度声明没有基准、判不了对错；单次测量在负载噪声下不可比 | 实测 | 待实现 |
 
 ## 内层细节
 
@@ -59,3 +61,17 @@
 | A9.1 | 依赖检查：Cargo.toml 里只有 workspace 内部 crate，core 没有任何依赖；加第三方依赖或让 core 依赖 sys 时失败 | 有人加了第三方依赖，或 core 开始做 IO | 集成 | 已实现 |
 | A9.2 | 用例表核对：已实现的单元/集成用例必须有标了编号的测试，代码里的编号都在表里，tests/ 里的测试都有标注；任一不满足时失败 | 用例表和测试脱节 | 集成 | 已实现 |
 
+## 价值验证
+
+A10 的通过线。条件：同一台 Apple Silicon Mac，只装一个 Xcode，接电源；开跑前 load average 低于 CPU 核数，暂停其他重任务；Spotlight 排除槽和基准用的 DerivedData；基准和 agb 交替跑，各 3 次取中位数，同时记最大最小；每个 app 固定一个提交。主测 Swiftfin，NetNewsWire 复测 V1、V3、V4。通过线里标"假设"的数，第一次实测后按数据定。
+
+| 编号 | 声明 | agb 的做法 | 基准 | 通过线 |
+| --- | --- | --- | --- | --- |
+| V1 | 新 worktree 首编（G2） | 槽已在提交 C 编过，新 worktree 也在 C | 裸 xcodebuild，新 DerivedData，不开编译缓存 | ≤ 基准的 50%（假设） |
+| V2 | 差 1、10、50 个提交的新 worktree（G2） | 槽在 C，worktree 在 C~1、C~10、C~50 | 同 V1 | 每档都比基准快；记命中率 |
+| V3 | A → B → A 切回（G5、S3） | 槽里依次编 A、B、A | 冷编 A | 切回 A 时可缓存任务命中率 ≥ 95%；产物可复现部分与冷编逐字节一致 |
+| V4 | 同一 worktree 改一个文件（G1） | 改一个模块里的函数实现再编 | 裸 xcodebuild 用这个 worktree 自己热的 DerivedData | agb − 基准 ≤ 基准的 10%（假设） |
+| V5a | 持久 runner 上的新分支（G4） | 槽已热；新的浅克隆，切到比主分支多 1 个提交的新分支 | 同 V1 | 同一个槽；耗时在 V2 的 C~1 档 ±20% 内；依赖 A18 |
+| V5b | 临时 runner：槽每次都冷 | 新浅克隆加空槽 | 同一新克隆上裸 xcodebuild 冷编 | agb 多出的时间 ≤ 冷编的 5%（假设），否则 README 写明临时 runner 上不用 |
+| V6 | 两个 worktree 轮流编的代价（N11） | 两个 worktree 交替 3 轮 | 各自热的 DerivedData | 只记录每次切换多花几秒，写进文档 |
+| V7 | 被忽略的大目录每次同步的开销 | 声明一个 10 万文件、约 500 MB 的合成目录，不改代码连续同步 5 次 | 设计里 2 万文件首次 2.2 秒、之后 0.8 秒 | 记录耗时；超过 5 秒（假设）就提按 mtime 跳过的设计问题 |
