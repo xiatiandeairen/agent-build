@@ -1,9 +1,9 @@
-//! The lines agent-build prints itself, the exit code, and which old logs to remove.
-//! Every line starts with `agent-build:` so agents can find them in a long build log.
+//! The lines agb prints itself, the exit code, and which old logs to remove.
+//! Every line starts with `agb:` so agents can find them in a long build log.
 use crate::args::Action;
 use crate::log::CacheStats;
 
-pub const PREFIX: &str = "agent-build:";
+pub const PREFIX: &str = "agb:";
 
 pub struct Summary<'a> {
     pub ok: bool,
@@ -70,12 +70,12 @@ pub fn output_lines(action: Action, products: &str, archive: &str, xcresult: Opt
         }
         Action::Build => {}
     }
-    v.push(format!("{PREFIX} products={products} (valid until this project's next agent-build run; copy what you keep)"));
+    v.push(format!("{PREFIX} products={products} (valid until this project's next agb run; copy what you keep)"));
     v
 }
 
 pub fn dropped_line(flag_and_value: &str) -> String {
-    format!("{PREFIX} ignored {flag_and_value}: output locations are managed by agent-build")
+    format!("{PREFIX} ignored {flag_and_value}: output locations are managed by agb")
 }
 
 pub fn waiting_line(owner: &str) -> String {
@@ -134,9 +134,9 @@ mod tests {
     fn summary_carries_result_slot_timings_cache_and_log() {
         let cache = CacheStats { hits: 46, misses: 23, misses_by_target: vec![] };
         let s = Summary { ok: true, slot: "app-1a2b3c4d", sync_secs: 1.06, build_secs: 35.94, cache: &cache, log: "/l/x.log" };
-        assert_eq!(summary_line(&s), "agent-build: ok slot=app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 log=/l/x.log");
-        assert!(summary_line(&Summary { ok: false, ..s }).starts_with("agent-build: failed "));
-        assert_eq!(phases_line(&[("resolve", 7.7), ("execute", 18.6)]).as_deref(), Some("agent-build: phases resolve=7.7s execute=18.6s"));
+        assert_eq!(summary_line(&s), "agb: ok slot=app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 log=/l/x.log");
+        assert!(summary_line(&Summary { ok: false, ..s }).starts_with("agb: failed "));
+        assert_eq!(phases_line(&[("resolve", 7.7), ("execute", 18.6)]).as_deref(), Some("agb: phases resolve=7.7s execute=18.6s"));
         assert_eq!(phases_line(&[]), None);
     }
 
@@ -145,7 +145,7 @@ mod tests {
     fn top_misses_lists_at_most_five_targets_and_nothing_without_misses() {
         let by: Vec<(String, usize)> = (0..7).map(|i| (format!("T{i}"), 10 - i)).collect();
         let c = CacheStats { hits: 0, misses: 49, misses_by_target: by };
-        assert_eq!(top_misses_line(&c).as_deref(), Some("agent-build: top misses: T0 10, T1 9, T2 8, T3 7, T4 6"));
+        assert_eq!(top_misses_line(&c).as_deref(), Some("agb: top misses: T0 10, T1 9, T2 8, T3 7, T4 6"));
         assert_eq!(top_misses_line(&CacheStats::default()), None);
         assert!(p4_line(&["App".into()]).is_some_and(|l| l.contains("P4 not met: App")));
         assert!(p5_line(&["App/Gen.swift".into()]).is_some_and(|l| l.contains("P5 not met") && l.contains("App/Gen.swift")));
@@ -159,11 +159,8 @@ mod tests {
         assert_eq!(build.len(), 1);
         assert!(build[0].contains("products=/s/dd/Build/Products") && build[0].contains("valid until"));
         let test = output_lines(Action::Test, "/p", "/a", Some("/s/dd/Logs/Test/T.xcresult"));
-        assert_eq!(test[0], "agent-build: test results=/s/dd/Logs/Test/T.xcresult");
-        assert_eq!(
-            output_lines(Action::Archive, "/p", "/s/archives/App.xcarchive", None)[0],
-            "agent-build: archive=/s/archives/App.xcarchive"
-        );
+        assert_eq!(test[0], "agb: test results=/s/dd/Logs/Test/T.xcresult");
+        assert_eq!(output_lines(Action::Archive, "/p", "/s/archives/App.xcarchive", None)[0], "agb: archive=/s/archives/App.xcarchive");
     }
 
     // A6.1

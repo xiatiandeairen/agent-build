@@ -28,6 +28,6 @@ cases:
 smoke:
     cargo test --test smoke -- --ignored
 
-# Install to ~/.local/bin/agent-build
+# Install to ~/.local/bin/agb
 install:
     cargo install --path . --root ~/.local --locked --force

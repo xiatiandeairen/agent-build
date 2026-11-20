@@ -29,7 +29,7 @@ description = "Run xcodebuild from any worktree in a fixed per-project build slo
 workspace = true
 
 [[bin]]
-name = "agent-build"
+name = "agb"
 path = "src/main.rs"
 
 [dependencies]

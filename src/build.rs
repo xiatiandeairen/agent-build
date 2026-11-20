@@ -51,7 +51,7 @@ pub fn run(ctx: &Context, lock: &SlotLock, sync_secs: f64) -> Outcome {
         Ok(Ended::Exited(code)) => Outcome::Built(code),
         Ok(Ended::Stopped(sig)) => Outcome::Signaled(sig),
         Err(e) => {
-            eprintln!("agent-build: cannot run {program}: {e}");
+            eprintln!("agb: cannot run {program}: {e}");
             Outcome::Built(127)
         }
     };

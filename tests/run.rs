@@ -17,7 +17,7 @@ fn wait_for(path: &Path) {
 }
 
 fn finish(child: Child) -> Run {
-    Run(child.wait_with_output().expect("wait for agent-build"))
+    Run(child.wait_with_output().expect("wait for agb"))
 }
 
 fn mtime(path: &Path) -> SystemTime {
@@ -107,7 +107,7 @@ fn a_failed_build_is_reported_as_is_once_with_its_exit_code_and_log() -> TestRes
     assert_eq!(r.code(), 65, "{}", r.all());
     assert!(r.stderr().contains(&format!("{}/App/A.swift:1:1: error: boom", a.display())), "{}", r.all());
     assert!(!r.stderr().lines().any(|l| l.contains("error: boom") && l.contains("/slots/")), "the error points into the slot: {}", r.all());
-    assert!(r.stderr().contains("agent-build: failed slot="), "{}", r.all());
+    assert!(r.stderr().contains("agb: failed slot="), "{}", r.all());
     assert_eq!(fs::read_to_string(&count)?.lines().count(), 1, "xcodebuild must run exactly once");
     let logs: Vec<_> = fs::read_dir(w.state().join("logs"))?.collect();
     assert_eq!(logs.len(), 1);
@@ -159,7 +159,7 @@ fn the_report_lists_phases_preconditions_misses_and_outputs_in_order() -> TestRe
     let env = [("FAKE_OUTPUT", log.to_string_lossy().into_owned()), ("FAKE_TOUCH", "App/B.swift".to_string())];
     let r = w.build(&a, &env);
     assert_eq!(r.code(), 0, "{}", r.all());
-    let ours: Vec<String> = r.stderr().lines().filter(|l| l.starts_with("agent-build:")).map(String::from).collect();
+    let ours: Vec<String> = r.stderr().lines().filter(|l| l.starts_with("agb:")).map(String::from).collect();
     let kinds: Vec<&str> = ours.iter().map(|l| l.split_whitespace().nth(1).unwrap_or("").split('=').next().unwrap_or("")).collect();
     assert_eq!(kinds, ["phases", "precondition", "top", "precondition", "products", "ok"], "{ours:#?}");
     assert!(ours[1].contains("P4 not met: Legacy") && ours[3].contains("P5 not met") && ours[3].contains("App/B.swift"), "{ours:#?}");

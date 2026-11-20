@@ -1,6 +1,6 @@
-//! What the caller asked for: `agent-build xcodebuild <args...>`.
-//! Output locations belong to agent-build, so the flags that set them are dropped here,
-//! and the settings agent-build adds are listed in one place (`injected`).
+//! What the caller asked for: `agb xcodebuild <args...>`.
+//! Output locations belong to agb, so the flags that set them are dropped here,
+//! and the settings agb adds are listed in one place (`injected`).
 
 /// The xcodebuild action that decides which output path the caller is told about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28,14 +28,14 @@ pub enum ArgError {
     MissingValue(String),
 }
 
-pub const USAGE: &str = "usage: agent-build xcodebuild <xcodebuild arguments...>";
+pub const USAGE: &str = "usage: agb xcodebuild <xcodebuild arguments...>";
 
 impl ArgError {
     pub fn message(&self) -> String {
         match self {
             ArgError::Usage => USAGE.to_string(),
             ArgError::NotXcodebuild(w) if w == "xcrun" || w.ends_with("/xcodebuild") => {
-                format!("write the command as `agent-build xcodebuild ...` (got `{w}`)")
+                format!("write the command as `agb xcodebuild ...` (got `{w}`)")
             }
             ArgError::NotXcodebuild(w) => format!("only xcodebuild is supported in this version (got `{w}`)\n{USAGE}"),
             ArgError::Unsupported(f) => format!("{f} is not supported in this version: it does not build"),
@@ -113,7 +113,7 @@ fn action_of(args: &[String]) -> Action {
     }
 }
 
-/// The only arguments agent-build adds: the slot's output locations and the compilation cache.
+/// The only arguments agb adds: the slot's output locations and the compilation cache.
 /// They go before the caller's arguments, so a setting the caller passes explicitly wins.
 pub fn injected(action: Action, derived_data: &str, archive_path: &str, cas_path: &str, cache_limit: &str) -> Vec<String> {
     let mut v = vec!["-derivedDataPath".to_string(), derived_data.to_string()];
@@ -152,7 +152,7 @@ mod tests {
         for first in ["xcrun", "/usr/bin/xcodebuild", "cargo", "swift"] {
             assert_eq!(parse(&v(&[first, "build"])), Err(ArgError::NotXcodebuild(first.into())));
         }
-        assert!(ArgError::NotXcodebuild("xcrun".into()).message().contains("agent-build xcodebuild"));
+        assert!(ArgError::NotXcodebuild("xcrun".into()).message().contains("agb xcodebuild"));
         assert!(ArgError::NotXcodebuild("cargo".into()).message().contains("only xcodebuild"));
         assert_eq!(parse(&v(&["xcodebuild", "-exportArchive", "-archivePath", "a"])), Err(ArgError::Unsupported("-exportArchive".into())));
         assert!(parse(&v(&["xcodebuild"])).is_ok(), "bare xcodebuild is passed through");

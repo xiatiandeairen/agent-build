@@ -1,4 +1,4 @@
-//! `agent-build xcodebuild <args...>`: run xcodebuild for any worktree in its project's fixed build
+//! `agb xcodebuild <args...>`: run xcodebuild for any worktree in its project's fixed build
 //! slot, so Xcode's incremental build and compilation cache carry over between worktrees.
 mod app;
 mod build;

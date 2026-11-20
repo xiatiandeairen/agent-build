@@ -1,5 +1,5 @@
 //! Shared by the integration tests: throwaway git repositories, an isolated HOME/XDG,
-//! and running the real agent-build binary against tests/fixtures/fake-xcodebuild.
+//! and running the real agb binary against tests/fixtures/fake-xcodebuild.
 #![allow(dead_code)] // each test file uses a different part of this module
 #![allow(clippy::expect_used)] // test helpers: a failed setup step should stop the test with its message
 
@@ -52,7 +52,7 @@ impl World {
     }
 
     pub fn command(&self, cwd: &Path, env: &[(&str, String)]) -> Command {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_agent-build"));
+        let mut c = Command::new(env!("CARGO_BIN_EXE_agb"));
         c.current_dir(cwd)
             .env("HOME", self.root.join("home"))
             .env("XDG_CACHE_HOME", self.root.join("xdg-cache"))
@@ -67,7 +67,7 @@ impl World {
         c
     }
 
-    /// `agent-build xcodebuild build` from `cwd`, waiting for it.
+    /// `agb xcodebuild build` from `cwd`, waiting for it.
     pub fn build(&self, cwd: &Path, env: &[(&str, String)]) -> Run {
         self.run(cwd, &["xcodebuild", "build", "-scheme", "App"], env)
     }

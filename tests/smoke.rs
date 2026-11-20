@@ -8,13 +8,13 @@ use std::process::Command;
 use support::*;
 
 fn line_value(out: &str, key: &str) -> Option<PathBuf> {
-    let line = out.lines().find(|l| l.starts_with(&format!("agent-build: {key}=")))?;
+    let line = out.lines().find(|l| l.starts_with(&format!("agb: {key}=")))?;
     let value = line.split_once('=')?.1;
     Some(PathBuf::from(value.split(" (").next().unwrap_or(value)))
 }
 
 fn real(w: &World, cwd: &Path, args: &[&str]) -> Run {
-    Run(w.command(cwd, &[]).env_remove("AGENT_BUILD_XCODEBUILD").args(args).output().expect("run agent-build"))
+    Run(w.command(cwd, &[]).env_remove("AGENT_BUILD_XCODEBUILD").args(args).output().expect("run agb"))
 }
 
 // A1
@@ -34,7 +34,7 @@ fn a_standard_project_builds_and_tests_without_any_configuration() {
         &["xcodebuild", "build", "-project", "SampleApp.xcodeproj", "-scheme", "App", "-destination", "generic/platform=iOS Simulator"],
     );
     assert_eq!(build.code(), 0, "{}", build.all());
-    assert!(build.stderr().contains("agent-build: ok slot=SampleApp-"), "{}", build.all());
+    assert!(build.stderr().contains("agb: ok slot=SampleApp-"), "{}", build.all());
     let products = line_value(&build.stderr(), "products").expect("products line");
     assert!(products.join("Debug-iphonesimulator/App.app").is_dir(), "no App.app under {}", products.display());
 

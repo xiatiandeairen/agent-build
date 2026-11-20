@@ -28,7 +28,7 @@ pub fn run(argv: &[String]) -> Outcome {
     };
     signals::install();
     if let Err(e) = fs::create_dir_all(&ctx.paths.root) {
-        eprintln!("agent-build: cannot create the slot {}: {e}", ctx.paths.root.display());
+        eprintln!("agb: cannot create the slot {}: {e}", ctx.paths.root.display());
         return Outcome::SyncFailed;
     }
     let me = format!("pid {}, worktree {}", std::process::id(), ctx.worktree.display());
@@ -36,13 +36,13 @@ pub fn run(argv: &[String]) -> Outcome {
         Ok(l) => l,
         Err(LockError::Interrupted(sig)) => return Outcome::Signaled(sig),
         Err(LockError::Io(e)) => {
-            eprintln!("agent-build: cannot lock the slot: {e}");
+            eprintln!("agb: cannot lock the slot: {e}");
             return Outcome::SyncFailed;
         }
     };
     let started = Instant::now();
     if let Err(e) = sync::sync(&ctx.worktree, &ctx.paths.src) {
-        eprintln!("agent-build: sync failed, nothing was built: {e}");
+        eprintln!("agb: sync failed, nothing was built: {e}");
         return Outcome::SyncFailed;
     }
     if let Some(sig) = signals::pending() {
@@ -52,7 +52,7 @@ pub fn run(argv: &[String]) -> Outcome {
 }
 
 fn usage(message: &str) -> Outcome {
-    eprintln!("agent-build: {message}");
+    eprintln!("agb: {message}");
     Outcome::Usage
 }
 
@@ -62,7 +62,7 @@ fn prepare(argv: &[String]) -> Result<Context, Outcome> {
         eprintln!("{}", report::dropped_line(d));
     }
     let cwd = env::current_dir().map_err(|e| usage(&format!("cannot read the current directory: {e}")))?;
-    let worktree = git::toplevel(&cwd).map_err(|_| usage("run agent-build inside a git repository (precondition P3)"))?;
+    let worktree = git::toplevel(&cwd).map_err(|_| usage("run agb inside a git repository (precondition P3)"))?;
     git::head(&worktree).map_err(|_| usage("the repository has no commit yet"))?;
     let prefix = git::prefix(&cwd).unwrap_or_default();
     let dirs = config::dirs(|k| env::var(k).ok()).ok_or_else(|| usage("HOME is not set"))?;
