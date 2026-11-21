@@ -140,10 +140,17 @@ pub fn command_line(inv: &Invocation) -> Vec<String> {
 pub const WRAPPER_VARS: [&str; 4] =
     ["RUSTC_WRAPPER", "CARGO_BUILD_RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER", "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER"];
 
-/// The environment cargo runs with in the slot: its target directory, and no rustc wrapper.
+/// kache also stands in front of the C compilers build scripts run (its `cc` shims on PATH,
+/// `HOST_CC = "kache cc"` in Cargo's config), which the variables above do not reach. Its own
+/// switch turns every layer into a plain pass-through (measured: no cache key is computed).
+pub const KACHE_OFF: (&str, &str) = ("KACHE_DISABLED", "1");
+
+/// The environment cargo runs with in the slot: its target directory, no rustc wrapper, and no
+/// kache in front of any compiler.
 pub fn env(target_dir: &str) -> Vec<(String, String)> {
     let mut v = vec![("CARGO_TARGET_DIR".to_string(), target_dir.to_string())];
     v.extend(WRAPPER_VARS.iter().map(|k| (k.to_string(), String::new())));
+    v.push((KACHE_OFF.0.to_string(), KACHE_OFF.1.to_string()));
     v
 }
 
@@ -211,7 +218,7 @@ mod tests {
 
     // A25.1
     #[test]
-    fn adds_json_messages_after_the_subcommand_and_clears_rustc_wrappers() {
+    fn adds_json_messages_after_the_subcommand_and_turns_off_compiler_caches() {
         let line = |s: &[&str]| command_line(&parse(&v(s)).unwrap());
         assert_eq!(
             line(&["+1.83.0", "test", "-p", "x", "--", "--nocapture"]),
@@ -220,8 +227,9 @@ mod tests {
         assert_eq!(line(&["clean"]), v(&["clean"]));
         let e = env("/s/target");
         assert_eq!(e[0], ("CARGO_TARGET_DIR".to_string(), "/s/target".to_string()));
-        assert_eq!(e.len(), 1 + WRAPPER_VARS.len());
-        assert!(e[1..].iter().all(|(k, val)| WRAPPER_VARS.contains(&k.as_str()) && val.is_empty()));
+        assert_eq!(e.len(), 2 + WRAPPER_VARS.len());
+        assert!(e[1..=WRAPPER_VARS.len()].iter().all(|(k, val)| WRAPPER_VARS.contains(&k.as_str()) && val.is_empty()));
+        assert!(e.contains(&("KACHE_DISABLED".to_string(), "1".to_string())), "kache's C layer is off too");
     }
 
     // A25.1

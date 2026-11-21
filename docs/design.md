@@ -287,7 +287,7 @@ agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 erro
 
 **正确性（G5）**：Cargo 按源码文件的修改时间判断要不要重编，不看内容。两个 worktree 共用一个 target 目录时，旧提交的 worktree 文件更旧，Cargo 会直接用别的 worktree 编出的产物（实测 h2：1.3 秒、重编 0 个单元）。槽里只有一份源码，同步只重写内容变了的文件，重写的文件修改时间是新的，所以修改时间可信；A22 用旧提交、旧修改时间的 worktree 守住这一点。在同一个槽里 A→B→A 切换，切回后的 `libcore_ffi.a` 与冷编逐字节一致（rust-sdk，dev 与 release 各一组，实测）。
 
-**不接 rustc wrapper（kache、sccache）**：wrapper 按自己的 key 复用产物，key 漏掉影响结果的输入就会编错：kache 的 rustc key 不含 `IPHONEOS_DEPLOYMENT_TARGET`，改了部署目标后产物里仍有 6 个 crate 是旧的 `minos 13.0`（2026-11-12 实测）。按优先级 1，复用只由 Cargo 自己判断：agb 把 `RUSTC_WRAPPER`、`CARGO_BUILD_RUSTC_WRAPPER`、`RUSTC_WORKSPACE_WRAPPER`、`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` 设为空（空值也盖过 Cargo 配置文件里的 `build.rustc-wrapper`），环境里设过的在输出里点名一行。代价：切回编过的提交时，内容变过的工作区 crate 要重编（rust-sdk 13 个，dev 约 8 秒，release 每个目标平台约 80 秒；有 kache 时约 1 秒，实测）。C 编译器那层（PATH 上的 `cc` 包装、Cargo 配置 `[env]` 里的 `HOST_CC`）属于环境，agb 不改。
+**不接 rustc wrapper（kache、sccache）**：wrapper 按自己的 key 复用产物，key 漏掉影响结果的输入就会编错：kache 的 rustc key 不含 `IPHONEOS_DEPLOYMENT_TARGET`，改了部署目标后产物里仍有 6 个 crate 是旧的 `minos 13.0`（2026-11-12 实测）。按优先级 1，复用只由 Cargo 自己判断：agb 把 `RUSTC_WRAPPER`、`CARGO_BUILD_RUSTC_WRAPPER`、`RUSTC_WORKSPACE_WRAPPER`、`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` 设为空（空值也盖过 Cargo 配置文件里的 `build.rustc-wrapper`），环境里设过的在输出里点名一行。代价：切回编过的提交时，内容变过的工作区 crate 要重编（rust-sdk 13 个，dev 约 8 秒，release 每个目标平台约 80 秒；有 kache 时约 1 秒，实测）。kache 还挡在构建脚本调用的 C 编译器前面（PATH 上的 `cc`、`cargo` shim，Cargo 配置 `[env]` 里的 `HOST_CC = "kache cc"`），上面几个变量管不到，agb 另设 `KACHE_DISABLED=1`：kache 的每一层都直接转给真编译器，不算 key、不读不写缓存（2026-11-21 实测：构建脚本经 `HOST_CC` 和 PATH 上的 `cc` 各编一次 C，直接用 cargo 时 kache 记了两次 `cc cache key`，经 agb 一次也没有）。这是 agb 里唯一认得 kache 的地方；其他 C 编译缓存（ccache、sccache 经 `CC` 接入）不处理。
 
 **前提**（在 P3、P5、P8 之外）：
 
