@@ -1,5 +1,5 @@
 //! Git-ignored inputs (precondition P8): named when a failed build looks for one, mirrored when
-//! the project declares it in `.agent-build/config.yaml`.
+//! the project declares it in `.agents/build/config.yaml`.
 #![allow(clippy::expect_used)] // test helpers: a failed setup step should stop the test with its message
 mod support;
 
@@ -53,7 +53,7 @@ fn ignored_inputs_are_named_when_missing_and_mirrored_once_declared() -> TestRes
     write(&a.join("gen/tool"), "#!/bin/sh\n");
     fs::set_permissions(a.join("gen/tool"), fs::Permissions::from_mode(0o755))?;
     symlink("lib/core.h", a.join("gen/link.h"))?;
-    write(&a.join(".agent-build/config.yaml"), "ignored_inputs:\n  - App/Gen.generated\n  - gen/\n");
+    write(&a.join(".agents/build/config.yaml"), "ignored_inputs:\n  - App/Gen.generated\n  - gen/\n");
     let r = w.build(&a, &[]);
     assert_eq!(r.code(), 0, "{}", r.all());
     let slot = w.slot_src();
@@ -84,7 +84,7 @@ fn ignored_inputs_are_named_when_missing_and_mirrored_once_declared() -> TestRes
     assert_eq!(tree(&slot.join("gen")), tree(&a.join("gen")));
 
     // No longer declared: removed from the slot, so the build cannot use a stale copy.
-    write(&a.join(".agent-build/config.yaml"), "ignored_inputs:\n  - App/Gen.generated\n");
+    write(&a.join(".agents/build/config.yaml"), "ignored_inputs:\n  - App/Gen.generated\n");
     assert_eq!(w.build(&a, &[]).code(), 0);
     assert!(!slot.join("gen").exists());
     fs::remove_file(a.join("App/Gen.generated"))?;
@@ -93,10 +93,10 @@ fn ignored_inputs_are_named_when_missing_and_mirrored_once_declared() -> TestRes
 
     // A broken project file is a usage error with its line; nothing is built.
     let count = w.path("count");
-    write(&a.join(".agent-build/config.yaml"), "ignored_inputs:\n  - ../outside\n");
+    write(&a.join(".agents/build/config.yaml"), "ignored_inputs:\n  - ../outside\n");
     let r = w.build(&a, &[("FAKE_COUNT", count.to_string_lossy().into_owned())]);
     assert_eq!(r.code(), 64, "{}", r.all());
-    assert!(r.stderr().contains(".agent-build/config.yaml: line 2:"), "{}", r.all());
+    assert!(r.stderr().contains(".agents/build/config.yaml: line 2:"), "{}", r.all());
     assert!(!count.exists(), "xcodebuild ran with a bad project file");
     Ok(())
 }

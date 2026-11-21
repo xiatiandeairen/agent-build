@@ -57,7 +57,7 @@ fn a_standard_project_builds_and_tests_without_any_configuration() {
     assert_eq!(build.code(), 0, "{}", build.all());
     assert!(build.stderr().contains("agb: ok slot=SampleApp-"), "{}", build.all());
     let products = line_value(&build.stderr(), "products").expect("products line");
-    assert_eq!(products, app.join(".agent-build/output/Products"), "the products are not in the worktree's output");
+    assert_eq!(products, app.join(".agents/build/output/Products"), "the products are not in the worktree's output");
     assert!(products.join("Debug-iphonesimulator/App.app").is_dir(), "no App.app under {}", products.display());
 
     let test = real(
@@ -95,7 +95,7 @@ fn a_workspace_with_a_local_mixed_package_in_a_subdirectory_builds_incrementally
     let first = build();
     assert_eq!(first.code(), 0, "{}", first.all());
     let products = line_value(&first.stderr(), "products").expect("products line");
-    assert_eq!(products, repo.join(".agent-build/output/Products"), "the products are not in the worktree's output");
+    assert_eq!(products, repo.join(".agents/build/output/Products"), "the products are not in the worktree's output");
     assert!(products.join("Debug-iphonesimulator/App.app").is_dir(), "no App.app under {}", products.display());
     let again = build(); // with the output now inside the worktree
     assert!(again.stderr().contains(" miss=0 "), "an unchanged rebuild redid cached work: {}", again.all());
@@ -180,7 +180,7 @@ fn tests_built_once_run_later_from_their_xctestrun_whatever_another_worktree_bui
         let r = real(&w, dir, &args);
         assert_eq!(r.code(), 0, "{}", r.all());
         let products = line_value(&r.stderr(), "products").expect("products line");
-        assert_eq!(products, dir.join(".agent-build/output/Products"), "the products are not in the worktree's output");
+        assert_eq!(products, dir.join(".agents/build/output/Products"), "the products are not in the worktree's output");
         let found = fs::read_dir(&products)
             .expect("products dir")
             .filter_map(Result::ok)
@@ -230,6 +230,6 @@ fn an_unsigned_archive_lands_where_agb_says() {
     );
     assert_eq!(r.code(), 0, "{}", r.all());
     let archive = line_value(&r.stderr(), "archive").expect("archive line");
-    assert_eq!(archive, app.join(".agent-build/output/App.xcarchive"), "the archive is not in the worktree's output");
+    assert_eq!(archive, app.join(".agents/build/output/App.xcarchive"), "the archive is not in the worktree's output");
     assert!(archive.join("Products/Applications/App.app").is_dir(), "no App.app in {}", archive.display());
 }

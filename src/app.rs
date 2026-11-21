@@ -20,7 +20,7 @@ pub struct Context {
     pub paths: slot::SlotPaths,
     /// What this run hands to its caller, in the worktree.
     pub output: project::Output,
-    /// Git-ignored paths the project declares its build needs (`.agent-build/config.yaml`, precondition P8).
+    /// Git-ignored paths the project declares its build needs (`.agents/build/config.yaml`, precondition P8).
     pub ignored_inputs: Vec<String>,
 }
 

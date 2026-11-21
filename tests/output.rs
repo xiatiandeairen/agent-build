@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use support::*;
 
 fn out(worktree: &Path) -> PathBuf {
-    worktree.join(".agent-build/output")
+    worktree.join(".agents/build/output")
 }
 
 fn product(worktree: &Path) -> Option<String> {
@@ -89,7 +89,7 @@ fn only_runs_that_make_an_output_replace_it() -> TestResult {
     write(&o.join(".staging/Debug/half"), "cut off\n");
     let r = w.build(&a.join("App"), &made_by(&w, "a"));
     assert_eq!(r.code(), 0, "{}", r.all());
-    assert!(!a.join("App/.agent-build").exists(), "the output followed the caller into a subdirectory");
+    assert!(!a.join("App/.agents/build").exists(), "the output followed the caller into a subdirectory");
     assert_eq!(product(&a).as_deref(), Some("a\n"));
     assert!(!o.join(".staging").exists(), "a copy cut off by an earlier run is still there");
 
@@ -100,7 +100,7 @@ fn only_runs_that_make_an_output_replace_it() -> TestResult {
 
     let args = w.path("args");
     let env = [made_by(&w, "x"), vec![("FAKE_ARGS", args.to_string_lossy().into_owned())]].concat();
-    let test = w.run(&a, &["xcodebuild", "test-without-building", "-xctestrun", ".agent-build/output/Products/Debug/App.app/App"], &env);
+    let test = w.run(&a, &["xcodebuild", "test-without-building", "-xctestrun", ".agents/build/output/Products/Debug/App.app/App"], &env);
     assert_eq!(test.code(), 0, "{}", test.all());
     let given = fs::read_to_string(&args)?.lines().skip_while(|l| *l != "-xctestrun").nth(1).unwrap_or_default().to_string();
     assert_eq!(Path::new(&given), o.join("Products/Debug/App.app/App"), "the slot has no copy of the output");
@@ -122,16 +122,21 @@ fn only_runs_that_make_an_output_replace_it() -> TestResult {
 fn the_output_stays_out_of_git_and_out_of_the_slot() -> TestResult {
     let w = World::new("gitout");
     let a = repo(&w.path("app"));
-    write(&a.join(".agent-build/config.yaml"), "ignored_inputs:\n");
+    write(&a.join(".agents/build/config.yaml"), "ignored_inputs:\n");
+    // .agents/ is shared with other agent tools (Codex reads .agents/skills/); agb keeps to build/.
+    write(&a.join(".agents/skills/demo/SKILL.md"), "skill\n");
     assert_eq!(w.build(&a, &made_by(&w, "a")).code(), 0);
     let ignore = fs::read_to_string(out(&a).join(".gitignore"))?;
     assert_eq!(ignore.lines().next(), Some("# Automatically created by agent-build."));
     git(&a, &["add", "-A"]);
-    assert_eq!(git(&a, &["diff", "--cached", "--name-only"]), ".agent-build/config.yaml", "only the project's config is committed");
+    let staged = git(&a, &["diff", "--cached", "--name-only"]);
+    assert_eq!(staged, ".agents/build/config.yaml\n.agents/skills/demo/SKILL.md", "only the project's files are committed");
+    assert_eq!(fs::read_to_string(a.join(".agents/skills/demo/SKILL.md"))?, "skill\n", "agb touched another tool's files");
 
     assert_eq!(w.build(&a, &made_by(&w, "b")).code(), 0);
     let slot = w.slot_src();
-    assert!(slot.join(".agent-build/config.yaml").is_file(), "the project's config did not reach the slot");
-    assert!(!slot.join(".agent-build/output").exists(), "the last run's output was synced into the slot");
+    assert!(slot.join(".agents/build/config.yaml").is_file(), "the project's config did not reach the slot");
+    assert!(slot.join(".agents/skills/demo/SKILL.md").is_file(), "the rest of .agents/ is synced like any project file");
+    assert!(!slot.join(".agents/build/output").exists(), "the last run's output was synced into the slot");
     Ok(())
 }

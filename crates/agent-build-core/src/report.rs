@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn tells_where_each_action_left_its_output() {
         let (p, a, r) =
-            ("/w/.agent-build/output/Products", "/w/.agent-build/output/App.xcarchive", "/w/.agent-build/output/result.xcresult");
+            ("/w/.agents/build/output/Products", "/w/.agents/build/output/App.xcarchive", "/w/.agents/build/output/result.xcresult");
         let build = output_lines(Action::Build, true, Some(p), a, Some(r));
         assert_eq!(build[0], format!("agb: results={r}"));
         assert!(build[1].contains(&format!("products={p}")) && build[1].contains("this worktree's next agb build"));

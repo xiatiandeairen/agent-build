@@ -266,8 +266,8 @@ mod tests {
     fn injects_only_the_slot_locations_and_cache_settings() {
         let out = Outputs {
             derived_data: "/s/DerivedData",
-            archive: "/w/.agent-build/output/App.xcarchive",
-            result_bundle: "/w/.agent-build/output/result.xcresult",
+            archive: "/w/.agents/build/output/App.xcarchive",
+            result_bundle: "/w/.agents/build/output/result.xcresult",
         };
         let build = injected(Action::Build, &out, "/c/cas", "40G");
         assert_eq!(
@@ -276,7 +276,7 @@ mod tests {
                 "-derivedDataPath",
                 "/s/DerivedData",
                 "-resultBundlePath",
-                "/w/.agent-build/output/result.xcresult",
+                "/w/.agents/build/output/result.xcresult",
                 "COMPILATION_CACHE_ENABLE_CACHING=YES",
                 "COMPILATION_CACHE_CAS_PATH=/c/cas",
                 "COMPILATION_CACHE_KEEP_CAS_DIRECTORY=YES",
@@ -285,7 +285,7 @@ mod tests {
             ])
         );
         let archive = injected(Action::Archive, &out, "/c/cas", "40G");
-        assert_eq!(&archive[2..4], &v(&["-archivePath", "/w/.agent-build/output/App.xcarchive"])[..]);
+        assert_eq!(&archive[2..4], &v(&["-archivePath", "/w/.agents/build/output/App.xcarchive"])[..]);
         assert_eq!(archive.len(), build.len() + 2);
         let info = injected(Action::Info, &out, "/c/cas", "40G");
         assert!(!info.contains(&"-resultBundlePath".to_string()) && info.len() == build.len() - 2, "{info:?}");

@@ -41,7 +41,7 @@ fn agb(w: &World, cwd: &Path, args: &[&str], extra: &[(&'static str, String)]) -
 }
 
 fn out(worktree: &Path, rel: &str) -> PathBuf {
-    worktree.join(".agent-build/output").join(rel)
+    worktree.join(".agents/build/output").join(rel)
 }
 
 fn set_version(repo: &Path, v: &str) {

@@ -111,7 +111,7 @@ fn a_failed_build_is_reported_as_is_once_with_its_exit_code_and_log() -> TestRes
     assert!(!r.stderr().lines().any(|l| l.contains("error: boom") && l.contains("/slots/")), "the error points into the slot: {}", r.all());
     assert!(r.stderr().contains("agb: failed slot="), "{}", r.all());
     assert_eq!(fs::read_to_string(&count)?.lines().count(), 1, "xcodebuild must run exactly once");
-    let log = a.join(".agent-build/output/build.log");
+    let log = a.join(".agents/build/output/build.log");
     assert!(r.stderr().contains(&format!("log={}", log.display())), "{}", r.all());
     assert!(fs::read_to_string(&log)?.contains("/slots/"), "the log keeps the raw output");
     Ok(())

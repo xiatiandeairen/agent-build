@@ -1,4 +1,4 @@
-//! `.agent-build/` at the root of a worktree: what agb keeps for this project and this worktree.
+//! `.agents/build/` at the root of a worktree: what agb keeps for this project and this worktree.
 //!
 //! `config.yaml` lists the git-ignored paths the build needs (precondition P8). Owned and committed
 //! by the project; the global config stays project-agnostic. Same minimal YAML subset as the
@@ -17,8 +17,8 @@
 use crate::config::{ConfigError, strip_comment, unquote};
 use std::path::{Path, PathBuf};
 
-pub const FILE: &str = ".agent-build/config.yaml";
-const OUTPUT: &str = ".agent-build/output";
+pub const FILE: &str = ".agents/build/config.yaml";
+const OUTPUT: &str = ".agents/build/output";
 /// Written as `output/.gitignore`: ignores the directory, itself included.
 pub const OUTPUT_GITIGNORE: &str = "# Automatically created by agent-build.\n*\n";
 
@@ -136,12 +136,12 @@ mod tests {
     #[test]
     fn the_output_lives_in_the_worktree_and_ignores_itself() {
         let out = output(Path::new("/w"));
-        assert_eq!(out.dir, PathBuf::from("/w/.agent-build/output"));
+        assert_eq!(out.dir, PathBuf::from("/w/.agents/build/output"));
         assert!(
             [&out.products, &out.target, &out.staging, &out.result_bundle, &out.log].iter().all(|p| p.parent() == Some(out.dir.as_path()))
         );
         assert_eq!(OUTPUT_GITIGNORE.lines().last(), Some("*"));
-        assert!(Path::new(FILE).starts_with(".agent-build"));
+        assert!(Path::new(FILE).starts_with(".agents/build"));
     }
 
     // A11.2
