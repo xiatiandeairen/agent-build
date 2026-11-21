@@ -119,9 +119,15 @@ fn finish(ctx: &Context, run: &Run) {
     let show = |s: &str| output::to_caller(s, &src, &wt).into_owned();
     let bundle = &ctx.output.result_bundle;
     let r = read_results(bundle, ctx.inv.action);
-    let errors: Vec<&xcresult::Issue> = r.issues.iter().filter(|i| i.severity == Severity::Error).collect();
+    // An error in a build that succeeded did not fail it (a build script printed `error:` and
+    // exited 0): shown apart and not counted, so the error count agrees with the exit code.
+    let recorded = r.issues.iter().filter(|i| i.severity == Severity::Error);
+    let (errors, nonfatal): (Vec<&xcresult::Issue>, Vec<&xcresult::Issue>) = recorded.partition(|_| !run.ok);
     for e in &errors {
         eprintln!("{}", report::issue_line(e.location.as_deref().map(show).as_deref(), e.severity, &show(&e.message)));
+    }
+    for e in &nonfatal {
+        eprintln!("{}", report::nonfatal_error_line(e.location.as_deref().map(show).as_deref(), &show(&e.message)));
     }
     for f in &r.failures {
         eprintln!("{}", report::test_failure_line(&show(f)));
@@ -147,7 +153,7 @@ fn finish(ctx: &Context, run: &Run) {
     if let Some(line) = clear_cache_over_limit(ctx) {
         eprintln!("{line}");
     }
-    let (n_errors, warnings) = (errors.len(), r.issues.len() - errors.len());
+    let (n_errors, warnings) = (errors.len(), r.issues.len() - errors.len() - nonfatal.len());
     let summary = Summary {
         ok: run.ok,
         slot: &ctx.slot_name,

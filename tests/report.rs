@@ -76,6 +76,23 @@ fn a_successful_build_reports_cache_counters_misses_and_phases() {
     assert!(p4.stderr().contains("agb: precondition P4 not met: App (explicit modules off)"), "{}", p4.all());
 }
 
+// A7.10
+#[test]
+fn errors_in_a_build_that_succeeded_are_shown_apart_and_not_counted() {
+    let w = World::new("report-nonfatal");
+    let a = repo(&w.path("app"));
+    let r = w.build(&a, &[bundle("error")]); // a recorded error, but xcodebuild exits 0
+    assert_eq!(r.code(), 0, "{}", r.all());
+    let err = r.stderr();
+    assert!(!err.lines().any(|l| l.contains(": error: ") || l.starts_with("error: ")), "printed as a compiler error: {err}");
+    assert!(
+        err.lines().any(|l| l.starts_with("agb: error that did not fail the build: ") && l.contains("Cannot convert return expression")),
+        "{err}"
+    );
+    let summary = err.lines().last().unwrap_or_default();
+    assert!(summary.starts_with("agb: ok ") && summary.contains(" errors=0 warnings=1 "), "{summary}");
+}
+
 // A7
 #[test]
 fn failed_tests_are_named_with_their_reasons() {

@@ -60,6 +60,16 @@ pub fn issue_line(location: Option<&str>, severity: Severity, message: &str) -> 
     }
 }
 
+/// An error Xcode recorded in a build that still succeeded, typically a build script that printed
+/// `error:` and exited 0. It did not fail the build, so it is not printed the way compilers print
+/// errors (editors and agents treat those as something to fix) and is not counted in `errors=`.
+pub fn nonfatal_error_line(location: Option<&str>, message: &str) -> String {
+    match location {
+        Some(at) => format!("{PREFIX} error that did not fail the build: {at}: {message}"),
+        None => format!("{PREFIX} error that did not fail the build: {message}"),
+    }
+}
+
 pub fn test_failure_line(failure: &str) -> String {
     format!("{PREFIX} test failed: {failure}")
 }
@@ -219,6 +229,16 @@ mod tests {
             [format!("agb: results={r}")],
             "a failed build has no products"
         );
+    }
+
+    // A7.10
+    #[test]
+    fn errors_that_did_not_fail_the_build_are_marked_as_such() {
+        assert_eq!(
+            nonfatal_error_line(None, "SwiftFormat not installed"),
+            "agb: error that did not fail the build: SwiftFormat not installed"
+        );
+        assert_eq!(nonfatal_error_line(Some("/w/x.sh:3"), "boom"), "agb: error that did not fail the build: /w/x.sh:3: boom");
     }
 
     // A7.6

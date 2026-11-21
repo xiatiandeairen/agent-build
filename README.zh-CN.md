@@ -28,6 +28,7 @@ agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 erro
 ```
 
 - 错误按编译器的格式输出，路径是 worktree 里的，编辑器和 agent 可以直接跳过去；警告只计数，完整内容在结果包和日志里。
+- 编译成功（退出码 0）但 Xcode 仍记了错误时（典型是构建脚本打印 `error:` 却以 0 退出），这些错误每条一行 `agb: error that did not fail the build: …`，不按编译器格式输出，也不计入汇总行的 `errors=`。
 - 编译失败但读不到结果包时（比如工程文件读不了），改为输出原始输出的最后 30 行。
 - `-showBuildSettings`、`-list` 这类只打印信息的命令，原样输出 xcodebuild 的内容。
 - 编译成功时还会给出 `products=<路径>`，`archive` 给出 `archive=<路径>.xcarchive`；编译失败时只给结果包路径。交给你的东西（产物、结果包、归档、`build.log`）都在 worktree 的 `.agent-build/output/` 里，这个目录自己不进 git。别的 worktree 编译不会动它；这个 worktree 下次产出同类东西的运行会替换它，要保留就复制走。`test-without-building` 不动它要测的产物，信息命令什么都不动。

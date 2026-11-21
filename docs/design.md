@@ -230,6 +230,7 @@ build 和 test 走同一条流程，共 6 步；每步对应下面一个机制�
 | 输出 | 来源（都是 xcresulttool 的 JSON） | 开销 |
 | --- | --- | --- |
 | 错误，按 `路径:行:列: error: 信息` | `get build-results` 的 `errors`（位置从 `sourceURL` 取，行列从 0 数，加 1） | 样例工程 22ms（实测） |
+| 没让编译失败的错误（退出码 0 时结果包里仍记着的错误，典型是构建脚本打印 `error:` 却以 0 退出，Xcode 另记一条 "emitted errors but did not return a nonzero exit code"）：一条一行 `agb: error that did not fail the build: …`，不按编译器格式、不计入 `errors=`，让错误数和退出码一致 | 同上；按退出码分：退出码 0 说明没有哪个错误让编译失败 | 无 |
 | 失败的测试和原因（只在 test） | `get test-results summary` 的 `testFailures` | 同上量级 |
 | 命中/未命中 | `get log --type build` 根节点的 `BuildOperationMetrics` 附件（Xcode 自己的计数） | 样例工程 52ms（实测），大工程未测 |
 | 未命中最多的 target（P6 自查入口） | build log 里带缓存未命中提示的任务，按任务所属 target 汇总 | 同上 |

@@ -38,6 +38,9 @@ agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 erro
 
 - Errors are printed the way compilers print them, with worktree paths, so editors and agents can
   jump to them; warnings are counted, and listed in full in the result bundle and the log.
+- Errors Xcode recorded in a build that still succeeded (exit code 0), typically a build script that
+  printed `error:` and exited 0, are printed as `agb: error that did not fail the build: …`, not in
+  compiler format, and are not counted in `errors=`.
 - When a failed build leaves no result bundle (for example, the project cannot be read), the last
   30 lines of the raw output are printed instead.
 - Commands that only print information, such as `-showBuildSettings` and `-list`, show xcodebuild's
