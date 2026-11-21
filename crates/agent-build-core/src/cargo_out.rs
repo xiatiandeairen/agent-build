@@ -82,11 +82,15 @@ fn unit(j: &Json) -> Unit {
     }
 }
 
-/// `path+file:///w/core#sample-core@0.1.0` → `sample-core`; the target's name when the id has none.
+/// `path+file:///w/core#sample-core@0.1.0` → `sample-core`. Cargo leaves the name out when it is
+/// the directory's (`path+file:///w/core-ffi#0.0.0` → `core-ffi`); the target's name when neither.
 fn package_name(id: &str, fallback: &str) -> String {
-    let after = id.rsplit_once('#').map_or("", |(_, r)| r);
-    let name = after.split('@').next().unwrap_or_default();
-    if name.is_empty() || name.contains('/') { fallback.to_string() } else { name.to_string() }
+    let Some((url, after)) = id.rsplit_once('#') else { return fallback.to_string() };
+    let name = match after.split_once('@') {
+        Some((name, _)) => name,
+        None => url.rsplit('/').next().unwrap_or_default(),
+    };
+    if name.is_empty() { fallback.to_string() } else { name.to_string() }
 }
 
 /// How much of the build Cargo reused, from its own `fresh` flags.

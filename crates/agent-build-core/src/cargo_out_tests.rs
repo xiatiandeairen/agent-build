@@ -44,6 +44,11 @@ fn counts_reuse_from_cargos_fresh_flags() {
     assert_eq!(all.rebuilt_local, ["sample-core", "sample-ffi"], "each package once");
     assert_eq!(rebuilt_line(&all).as_deref(), Some("agb: rebuilt: sample-core, sample-ffi"));
     assert_eq!(rebuilt_line(&Stats::default()), None);
+    let short = r#"{"reason":"compiler-artifact","package_id":"path+file:///w/crates/core-ffi#0.0.0","target":{"name":"core_ffi","kind":["lib"]},"fresh":false,"filenames":[]}"#;
+    assert!(
+        matches!(message(short, "/slot"), Some(Message::Unit(Unit { package, .. })) if package == "core-ffi"),
+        "name left out of the id"
+    );
     let line =
         summary_line(&Summary { ok: true, slot: "s-1", sync_secs: 0.25, build_secs: 2.0, stats: &all, errors: 0, warnings: 1, log: "/l" });
     assert_eq!(line, "agb: ok slot=s-1 sync=0.2s build=2.0s units fresh=0 rebuilt=4 errors=0 warnings=1 log=/l");
