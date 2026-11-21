@@ -287,7 +287,7 @@ agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 erro
 
 **正确性（G5）**：Cargo 按源码文件的修改时间判断要不要重编，不看内容。两个 worktree 共用一个 target 目录时，旧提交的 worktree 文件更旧，Cargo 会直接用别的 worktree 编出的产物（实测 h2：1.3 秒、重编 0 个单元）。槽里只有一份源码，同步只重写内容变了的文件，重写的文件修改时间是新的，所以修改时间可信；A22 用旧提交、旧修改时间的 worktree 守住这一点。在同一个槽里 A→B→A 切换，切回后的 `libcore_ffi.a` 与冷编逐字节一致（rust-sdk，dev 与 release 各一组，实测）。
 
-**不接 rustc wrapper（kache、sccache）**：wrapper 按自己的 key 复用产物，key 漏掉影响结果的输入就会编错：kache 的 rustc key 不含 `IPHONEOS_DEPLOYMENT_TARGET`，改了部署目标后产物里仍有 6 个 crate 是旧的 `minos 13.0`（2026-11-12 实测）。按优先级 1，复用只由 Cargo 自己判断：agb 把 `RUSTC_WRAPPER`、`CARGO_BUILD_RUSTC_WRAPPER`、`RUSTC_WORKSPACE_WRAPPER`、`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` 设为空（空值也盖过 Cargo 配置文件里的 `build.rustc-wrapper`），环境里设过的在输出里点名一行。代价：切回编过的提交时，内容变过的工作区 crate 要重编（rust-sdk 13 个，dev 6.7 秒（2026-11-21，44b1806）；release 单个目标平台切回约 80 秒是 52755fd 在高负载下测的，没用这版重测；有 kache 时约 1 秒）。kache 还挡在构建脚本调用的 C 编译器前面（PATH 上的 `cc`、`cargo` shim，Cargo 配置 `[env]` 里的 `HOST_CC = "kache cc"`），上面几个变量管不到，agb 另设 `KACHE_DISABLED=1`：kache 的每一层都直接转给真编译器，不算 key、不读不写缓存（2026-11-21 实测：构建脚本经 `HOST_CC` 和 PATH 上的 `cc` 各编一次 C，直接用 cargo 时 kache 记了两次 `cc cache key`，经 agb 一次也没有）。这是 agb 里唯一认得 kache 的地方；其他 C 编译缓存（ccache、sccache 经 `CC` 接入）不处理。
+**不接 rustc wrapper（kache、sccache）**：wrapper 按自己的 key 复用产物，key 漏掉影响结果的输入就会编错：kache 的 rustc key 不含 `IPHONEOS_DEPLOYMENT_TARGET`，改了部署目标后产物里仍有 6 个 crate 是旧的 `minos 13.0`（2026-11-12 实测）。按优先级 1，复用只由 Cargo 自己判断：agb 把 `RUSTC_WRAPPER`、`CARGO_BUILD_RUSTC_WRAPPER`、`RUSTC_WORKSPACE_WRAPPER`、`CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER` 设为空（空值也盖过 Cargo 配置文件里的 `build.rustc-wrapper`），环境里设过的在输出里点名一行。代价：切回编过的提交时，内容变过的工作区 crate 要重编（rust-sdk 13 个，dev 6.7 秒（2026-11-21，44b1806）；release 单个目标平台切回约 80 秒是 52755fd 在高负载下测的，没用这版重测；有 kache 时约 1 秒）。构建脚本调用的 C 编译器前面的缓存（PATH 上冒充 `cc` 的 shim、`HOST_CC`/`CC` 里的包装前缀）agb 不处理，写成前提 R3：这些挂法没有 Cargo 那样的标准变量，agb 只能按工具名逐个认（例如 kache 的 `KACHE_DISABLED`），会让 agb 绑定具体缓存工具。实测这层确实在：本机装 kache 时，构建脚本经 `HOST_CC` 和 PATH 上的 `cc` 各编一次 C，kache 各算了一次缓存 key（2026-11-21）。
 
 **前提**（在 P3、P5、P8 之外）：
 
@@ -295,6 +295,7 @@ agb: failed slot=my-app-1a2b3c4d sync=1.1s build=35.9s cache hit=46 miss=23 erro
 | --- | --- | --- |
 | R1 | 编译结果只取决于源码、`Cargo.lock`、工具链和构建脚本声明过的输入（`rerun-if-changed`、`rerun-if-env-changed`）；本机和 CI 的环境变量不同由接入方负责 | 声明过的变了：Cargo 重跑，正确但慢；没声明的影响了产物：不保证，agb 不检测（同 P6） |
 | R2 | 多步出包（生成绑定、lipo、打包）读 `output/target/` 里的产物，不读槽 | 读到别的 worktree 后来编的东西 |
+| R3 | 构建脚本调用的 C/C++ 编译器前面没有缓存（PATH 上的 `cc` shim、`HOST_CC`/`CC` 里的包装前缀） | 缓存 key 漏掉影响结果的输入时，C 产物编错；agb 不检测 |
 
 **输出**（终端，编完）：错误按 `worktree 路径:行:列: error: 信息`（rustc 的完整文字在 `build.log`）、失败的测试、`agb: rebuilt: <重编的本项目包>`、P5、P8、`products=`、汇总行 `agb: ok slot=… sync=… build=… units fresh=N rebuilt=M errors=… warnings=… log=…`。`fresh`、`rebuilt` 来自 Cargo 消息里每个单元的 `fresh` 字段。构建脚本的运行次数不显示：Cargo 对没重跑的构建脚本也发 `build-script-executed`，数不出重跑了几个（实测：空编译仍有 26 条）。
 
