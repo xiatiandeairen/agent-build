@@ -60,7 +60,7 @@ When agents work in many worktrees, every new worktree gets its own DerivedData,
 | Thousands of lines of output fill an agent's context | Prints only errors (compiler format, worktree paths), failed tests and one summary line; the full output goes to a log |
 | Nobody can tell why a build is slow | Reports time per phase, cache hits and misses, the targets with the most misses, and which [precondition](#preconditions) is not met |
 
-On the sample app in this repository (Xcode 27.2, Apple Silicon), the first build takes 8.4 s and the same build from a second worktree takes 1.5 s. On a 2,400-file app, an earlier prototype of the same design took a new worktree's first build from 178 s to 45 s; this version has not been measured there yet.
+On the sample app in this repository (Xcode 27.2, Apple Silicon, measured 2026-11-23), a new worktree's first build takes 4.8 s with plain `xcodebuild` and 1.3 s with `agb`, which also prints 5 lines instead of 646. On a 2,400-file app, an earlier prototype of the same design took a new worktree's first build from 178 s to 45 s; this version has not been measured there yet.
 
 agb only changes where and how a build runs. It does not decide how many builds the machine runs at once; pair it with a queue such as [agent-quay](https://github.com/xiatiandeairen/agent-quay) for that.
 

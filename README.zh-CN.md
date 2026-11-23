@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/eea34804-08f6-4c09-9820-1945dad95a9d
 | 几千行输出塞满 agent 的上下文 | 只打印错误（编译器格式、worktree 路径）、失败的测试和一行汇总，完整输出写进日志 |
 | 没人说得清编译为什么慢 | 报告各阶段耗时、缓存命中和未命中、未命中最多的 target，以及哪条[设定前提](#设定前提)没满足 |
 
-在本仓库的样例 App 上（Xcode 27.2，Apple Silicon），第一次编译 8.4 秒，换到第二个 worktree 再编 1.5 秒。在一个 2400 个文件的 App 上，同一设计的早期原型把新 worktree 的第一次编译从 178 秒降到 45 秒；当前版本还没在那个 App 上测过。
+在本仓库的样例 App 上（Xcode 27.2，Apple Silicon，2026-11-23 实测），新 worktree 的第一次编译，直接用 `xcodebuild` 要 4.8 秒，用 `agb` 只要 1.3 秒，输出也从 646 行变成 5 行。在一个 2400 个文件的 App 上，同一设计的早期原型把新 worktree 的第一次编译从 178 秒降到 45 秒；当前版本还没在那个 App 上测过。
 
 agb 只管编译在哪里跑、怎么跑，不管整台机器同时跑几个编译；要限并发，配一个队列，比如 [agent-quay](https://github.com/xiatiandeairen/agent-quay)。
 
