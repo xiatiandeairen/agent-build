@@ -23,9 +23,9 @@
 
 <br>
 
-![agb 在一个 worktree 里冷编译样例 App，换到第二个 worktree 只用 1.5 秒，再把一处错误按第二个 worktree 的路径报出来](docs/demo/demo.gif)
+![agb 在一个 worktree 里冷编译样例 App，换到新 worktree 不到 2 秒编完，两条计时进度条并排对比](docs/demo/demo.gif)
 
-<sub>`tests/fixtures/SampleApp` 上真实的 `xcodebuild`，剪掉了空等。用 `docs/demo/record.sh` 可重录。</sub>
+<sub>`tests/fixtures/SampleApp` 上真实的 `xcodebuild`，剪掉了空等。用 [demo-reel](https://github.com/xiatiandeairen/demo-reel) 录制（`examples/agent-build`）。</sub>
 
 ## 目录
 

@@ -23,9 +23,9 @@ English · [简体中文](README.zh-CN.md)
 
 <br>
 
-![agb builds the sample app cold in one worktree, then in 1.5 s from a second worktree, then reports a mistake at the second worktree's path](docs/demo/demo.gif)
+![agb builds the sample app cold in one worktree, then a new worktree of it in under 2 seconds, timer bars side by side](docs/demo/demo.gif)
 
-<sub>Real `xcodebuild` runs on `tests/fixtures/SampleApp`; idle waits are cut. Re-record with `docs/demo/record.sh`.</sub>
+<sub>Real `xcodebuild` runs on `tests/fixtures/SampleApp`; idle waits are cut. Recorded with [demo-reel](https://github.com/xiatiandeairen/demo-reel) (`examples/agent-build`).</sub>
 
 ## Contents
 
