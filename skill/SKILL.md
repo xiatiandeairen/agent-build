@@ -17,19 +17,19 @@ agb 把当前 worktree 的内容同步进这个项目固定路径的槽（一份
 | cargo 的 build、check、test、bench、run、doc、clippy、rustc、clean | `agb cargo <参数>` |
 | cargo 的 fmt、fix、`clippy --fix`、add、remove、update、install 等改文件或不编译的 | 在 worktree 里直接 `cargo`：交给 agb 会以 64 退出 |
 
-本机装了 aq 时，经它排队：`aq run -- agb xcodebuild <参数>`、`aq run -- agb cargo <参数>`（排队和等待按 aq skill）。找不到 `agb` 命令时，告诉用户在 agent-build 仓库里跑 `just install`。
+本机装了 aq 时，经它排队：`aq run -- agb xcodebuild <参数>`、`aq run -- agb cargo <参数>`（排队和等待按 aq skill）。
 
 `agb cargo clean` 清空的是这个项目所有 worktree 共用的槽里的 target 目录，之后每个 worktree 都要从头编；编译结果不对时先看错误行，不靠 clean。
 
 ## 跑一次编译
 
 1. 在 worktree 或它的子目录里，照平时的参数在 `xcodebuild` 或 `cargo` 前面加 `agb`。输出位置参数不用传，传了会被丢掉并提示：xcodebuild 的 `-derivedDataPath`、`-archivePath`、`-resultBundlePath`、`-clonedSourcePackagesDirPath`，cargo 的 `--target-dir`、`--message-format`（`CARGO_TARGET_DIR` 也不起作用）。完成判据：拿到退出码。
-2. 按「输出怎么读」处理 stderr 里的行：先看编译器格式的错误和 `agb: test failed:`，再看最后一行汇总。`cargo run`、`bench` 的程序输出原样在 stdout。完成判据：汇总行是 `agb: ok`；或每个错误、每个失败的测试都已在 worktree 里修掉并重新编过。
+2. 按「输出和退出码」处理 stderr 里的行：先看编译器格式的错误和 `agb: test failed:`，再看最后一行汇总。`cargo run`、`bench` 的程序输出原样在 stdout。完成判据：汇总行是 `agb: ok`；或每个错误、每个失败的测试都已在 worktree 里修掉并重新编过。
 3. 要用产物时，从 `agb: products=`、`agb: archive=` 给的路径取。它们在这个 worktree 的 `.agents/build/output/` 下（xcodebuild 在 `Products/`；cargo 在 `target/`，路径与 target 目录里相同，如 `target/debug/libfoo.a`），只会被这个 worktree 下一次产出同类东西的运行替换；要长期留的复制出来。cargo 只有 `build`、`rustc` 交产物，只交本项目的库和程序（`.a`、`.dylib`、可执行文件），`check`、`test` 不动上次的产物。完成判据：拿到了要用的产物路径。
 
 改代码只在 worktree 里改：槽每次运行都会被同步成 worktree 的样子，在槽里改的东西下一次就没了。
 
-## 输出怎么读
+## 输出和退出码
 
 xcodebuild、cargo 的完整输出写进日志，终端只有 agb 整理过的行，路径都已换回 worktree 里的路径。只标了一个工具的行只有它会出。
 
@@ -51,9 +51,7 @@ xcodebuild、cargo 的完整输出写进日志，终端只有 agb 整理过的�
 | `agb: cache ... exceeded cache_limit ... and was cleared` | xcodebuild：编译缓存超上限，已清空 | 下一次编译会慢一些，自动回填 |
 | `agb: ok\|failed slot=… sync=…s build=…s … errors=… warnings=… log=…` | 汇总，最后一行；中间 xcodebuild 是 `cache hit=… miss=…`，cargo 是 `units fresh=… rebuilt=…`（复用和重编的编译单元数） | 警告只计数，要看内容读结果包或日志 |
 
-## 退出码
-
-| 码 | 意思 | 下一步 |
+| 退出码 | 意思 | 下一步 |
 | --- | --- | --- |
 | 0 | 编译成功 | 继续 |
 | 64 | agb 的参数写法错，或 cargo 子命令不在槽里跑（与 xcodebuild 自己的参数错误同码） | 按提示改调用，或直接用 cargo |
@@ -61,6 +59,12 @@ xcodebuild、cargo 的完整输出写进日志，终端只有 agb 整理过的�
 | 127 | 找不到 xcodebuild 或 cargo | 告诉用户检查 Xcode 安装和 `xcode-select`，或 Rust 工具链 |
 | 128+N | agb 收到信号 N 被中断，已停掉整组子进程 | 需要就重跑 |
 | 其他 | xcodebuild、cargo 自己的退出码（cargo 编译失败、测试失败是 101） | 按错误行处理 |
+
+## 出错时
+
+| 现象 | 怎么办 |
+| --- | --- |
+| 找不到 `agb` | 告诉用户在 agent-build 仓库里跑 `just install` |
 
 ## 给工程提速
 
