@@ -27,6 +27,10 @@ English · [简体中文](README.zh-CN.md)
 
 <sub>Real `xcodebuild` runs on `tests/fixtures/SampleApp`; idle waits are cut. Recorded with [demo-reel](https://github.com/xiatiandeairen/demo-reel) (`examples/agent-build`).</sub>
 
+<sub>With narration (sound on):</sub>
+
+https://github.com/user-attachments/assets/eea34804-08f6-4c09-9820-1945dad95a9d
+
 ## Contents
 
 - [Why agent-build](#why-agent-build)
