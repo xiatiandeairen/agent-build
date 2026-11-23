@@ -27,6 +27,10 @@
 
 <sub>`tests/fixtures/SampleApp` 上真实的 `xcodebuild`，剪掉了空等。用 [demo-reel](https://github.com/xiatiandeairen/demo-reel) 录制（`examples/agent-build`）。</sub>
 
+<sub>带英文旁白的完整介绍（请开声音）：</sub>
+
+https://github.com/user-attachments/assets/eea34804-08f6-4c09-9820-1945dad95a9d
+
 ## 目录
 
 - [为什么需要 agent-build](#为什么需要-agent-build)
